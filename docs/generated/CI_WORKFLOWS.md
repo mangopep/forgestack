@@ -8,6 +8,7 @@ Extracted directly from `.github/workflows/*.yml` by line-oriented parsing of `n
 | Workflow file | Name | Triggers |
 |---|---|---|
 | `automated-review.yml` | Automated PR Code Reviewer | pull_request |
+| `branch-policy.yml` | Branch Flow Policy | pull_request |
 | `ci.yml` | CI and Quality Gates | push, pull_request |
 | `codeql.yml` | CodeQL Security Analysis | push, pull_request, schedule |
 | `container-scan.yml` | Container Image Scan (no push) | push, pull_request |

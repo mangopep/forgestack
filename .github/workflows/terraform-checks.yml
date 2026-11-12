@@ -1,9 +1,13 @@
 name: Terraform Checks (no deploy)
+# Deliberately NOT path-filtered at the `on:` level — see container-scan.yml
+# for why a workflow-level `paths:` filter makes a "required" check either
+# block merges forever (status never reported) or risk being treated as
+# satisfied despite never running. Relevance is decided inside the `validate`
+# job instead, so it always reports a real success/failure.
 on:
   push:
-    paths: ['infrastructure/terraform/**', '.github/workflows/terraform-checks.yml']
-  pull_request:
-    paths: ['infrastructure/terraform/**', '.github/workflows/terraform-checks.yml']
+    branches: [main, staging, develop]
+  pull_request: {}
 permissions:
   contents: read
 jobs:
@@ -13,17 +17,50 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
+      - name: Detect relevant changes
+        id: changed
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            range="$BASE_SHA...$HEAD_SHA"
+          else
+            range="$BEFORE_SHA...$GITHUB_SHA"
+          fi
+          if git diff --name-only "$range" -- infrastructure/terraform .github/workflows/terraform-checks.yml > /tmp/changed.txt 2>/tmp/changed.err; then
+            if [ -s /tmp/changed.txt ]; then
+              echo "relevant=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "relevant=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "::warning::could not compute diff ($range); validating anyway as a fail-safe default" >&2
+            cat /tmp/changed.err >&2
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          fi
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        if: steps.changed.outputs.relevant == 'true'
       - name: Format
+        if: steps.changed.outputs.relevant == 'true'
         run: terraform -chdir=infrastructure/terraform/aws-s3-sandbox fmt -check
       - name: Initialize without backend
+        if: steps.changed.outputs.relevant == 'true'
         run: terraform -chdir=infrastructure/terraform/aws-s3-sandbox init -backend=false
       - name: Validate
+        if: steps.changed.outputs.relevant == 'true'
         run: terraform -chdir=infrastructure/terraform/aws-s3-sandbox validate
       - name: IaC security scan
+        if: steps.changed.outputs.relevant == 'true'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: config
           scan-ref: infrastructure/terraform
           exit-code: '1'
           severity: HIGH,CRITICAL
+      - name: No Terraform-affecting changes — explicit pass
+        if: steps.changed.outputs.relevant == 'false'
+        run: echo "No infrastructure/terraform changes in this diff; validate/scan intentionally not re-run. This step exists so the job always reports a real success, not a skip."

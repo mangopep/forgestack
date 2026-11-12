@@ -1,0 +1,27 @@
+name: Branch Flow Policy
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.27.4'
+      - name: Enforce feature/* -> develop -> staging -> main (hotfix/* exception documented)
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+          # The actual PR author's login, not the workflow's run actor —
+          # used only to confirm a dependabot/* branch was genuinely opened
+          # by Dependabot before exempting it. github.actor would report
+          # whoever triggered re-runs/edits, which is not the same thing.
+          ACTOR: ${{ github.event.pull_request.user.login }}
+        run: go run ./cmd/branchpolicy
