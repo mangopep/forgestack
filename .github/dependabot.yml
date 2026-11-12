@@ -12,3 +12,16 @@ updates:
   - package-ecosystem: npm
     directory: /website
     schedule: { interval: weekly }
+    groups:
+      # react and react-dom's package.json versions must always move
+      # together (react-dom declares a peer dependency on react's exact
+      # major version) — Dependabot opened them as two independent PRs
+      # once (react-19.3.1 and react-dom-19.3.1, separately), each broken
+      # on its own since npm's peer resolution rejects a mismatch. This
+      # groups them into a single PR going forward.
+      react:
+        patterns: ['react', 'react-dom']
+      # @docusaurus/* packages are versioned in lockstep upstream; bumping
+      # one without the others is never a supported combination.
+      docusaurus:
+        patterns: ['@docusaurus/*']
