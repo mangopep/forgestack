@@ -12,5 +12,6 @@ Extracted directly from `.github/workflows/*.yml` by line-oriented parsing of `n
 | `codeql.yml` | CodeQL Security Analysis | push, pull_request, schedule |
 | `container-scan.yml` | Container Image Scan (no push) | push, pull_request |
 | `docs-check.yml` | Documentation Checks | push, pull_request |
+| `pages-deploy.yml` | Deploy Docs to GitHub Pages | push, workflow_dispatch |
 | `secret-scan.yml` | Secret Scanning | push, pull_request |
 | `terraform-checks.yml` | Terraform Checks (no deploy) | push, pull_request |
