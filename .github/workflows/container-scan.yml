@@ -1,7 +1,7 @@
 name: Container Image Scan (no push)
 on:
   push:
-    branches: [main]
+    branches: [main, staging, develop]
     paths: ['Dockerfile', 'go.mod', 'go.sum', 'cmd/**', 'internal/**', '.github/workflows/container-scan.yml']
   pull_request:
     paths: ['Dockerfile', 'go.mod', 'go.sum', 'cmd/**', 'internal/**', '.github/workflows/container-scan.yml']

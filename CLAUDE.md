@@ -10,11 +10,13 @@ You are the senior Go engineer, cloud architect, DevSecOps engineer, code review
 - Small steps, maintain a working project; ask before irreversible, account-changing, security-sensitive, or chargeable actions.
 
 ## Current implementation (do not misrepresent)
-- `cmd/api`, `internal/api`: Go standard-library API with in-memory posts and tests.
+- `cmd/api`, `internal/platform/router`, `internal/modules/posts/{domain,service,endpoint,transport,repository}`: layered Go kit posts API with in-memory storage and tests (see `docs/adr/0001-go-kit-for-posts-module.md`). `internal/api` no longer exists — replaced by this structure.
+- `internal/docgen`, `cmd/docgen`: deterministic documentation generation/impact-detection; `docs/doc-impact-map.json` is its config.
+- `internal/branchpolicy`, `cmd/branchpolicy`: enforces the `feature/* → develop → staging → main` flow on PRs (see `docs/handbook/BRANCHING.md`). **Only `main` exists as a long-lived branch today** — `develop`/`staging` creation and the matching rulesets are an approval-gated migration, not yet done.
 - `compose.yaml`: optional PostgreSQL, Redis, ClickHouse containers; these are **NOT wired into the Go API yet**.
 - `infrastructure/terraform/aws-s3-sandbox`: opt-in S3 example, not production infra.
 - `.github/workflows/`: non-deploy CI, CodeQL and review checks. No automatic AI PR reviewer is installed.
-- See `README.md`, `docs/ROADMAP.md`, `docs/COST-SAFETY.md`, `docs/COMMANDS.md`.
+- See `README.md`, `docs/ROADMAP.md`, `docs/COST-SAFETY.md`, `docs/COMMANDS.md`, `docs/PRODUCTION_READINESS.md`.
 
 ## Work protocol — every coding task
 1. Read relevant existing files, run `git status --short`, define acceptance criteria and risks.

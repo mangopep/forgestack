@@ -95,6 +95,18 @@
       "area": "GitHub Pages publishing",
       "doc_path": "docs/GITHUB-PAGES-SETUP.md",
       "kind": "manual"
+    },
+    {
+      "pattern": "internal/branchpolicy/**/*.go",
+      "area": "Branch flow policy",
+      "doc_path": "docs/handbook/BRANCHING.md",
+      "kind": "manual"
+    },
+    {
+      "pattern": "docs/handbook/**",
+      "area": "Contributor handbook",
+      "doc_path": "docs/handbook/",
+      "kind": "manual"
     }
   ]
 }
