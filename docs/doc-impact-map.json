@@ -13,6 +13,24 @@
       "kind": "manual"
     },
     {
+      "pattern": "Makefile",
+      "area": "Command reference",
+      "doc_path": "docs/generated/COMMANDS.md",
+      "kind": "generated"
+    },
+    {
+      "pattern": "cmd/**/*.go",
+      "area": "Environment variable reference",
+      "doc_path": "docs/generated/CONFIG.md",
+      "kind": "generated"
+    },
+    {
+      "pattern": "internal/**/*.go",
+      "area": "Environment variable reference",
+      "doc_path": "docs/generated/CONFIG.md",
+      "kind": "generated"
+    },
+    {
       "pattern": "docs/adr/**",
       "area": "Architecture decision records",
       "doc_path": "docs/adr/",
@@ -47,6 +65,12 @@
       "area": "CI/CD workflows",
       "doc_path": "docs/generated/CI_WORKFLOWS.md",
       "kind": "generated"
+    },
+    {
+      "pattern": ".github/workflows/**",
+      "area": "PR validation / publishing flow diagram",
+      "doc_path": "docs/architecture/CI-CD-FLOW.md",
+      "kind": "manual"
     },
     {
       "pattern": ".golangci.yml",
