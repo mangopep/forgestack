@@ -32,9 +32,6 @@ func TestInMemoryAddPropagatesBuildError(t *testing.T) {
 		return domain.NewPost(id, "", "b", time.Now()) // invalid: empty author
 	})
 	if !errors.Is(err, domain.ErrAuthorRequired) {
-
-	if err != domain.ErrAuthorRequired {
-
 		t.Fatalf("expected ErrAuthorRequired, got %v", err)
 	}
 	if got := r.List(ctx, 10); len(got) != 0 {
