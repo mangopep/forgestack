@@ -1,12 +1,14 @@
-.PHONY: help run test race fmt vet build docker-up docker-data docker-analytics docker-down docker-clean smoke
+.PHONY: help run test race fmt vet lint build docker-up docker-data docker-analytics docker-down docker-clean smoke
 help:
-	@echo 'run test race fmt vet build docker-up docker-data docker-analytics docker-down docker-clean smoke'
+	@echo 'run test race fmt vet lint build docker-up docker-data docker-analytics docker-down docker-clean smoke'
 run:
 	go run ./cmd/api
 fmt:
 	gofmt -w cmd internal
 vet:
 	go vet ./...
+lint:
+	golangci-lint run ./...
 test:
 	go test ./... -cover
 race:
