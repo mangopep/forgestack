@@ -117,4 +117,3 @@ GitHub either blocks the merge forever (safe but confusing) or, depending on rul
 configuration, treats it as satisfied despite never running (unsafe). This repository's
 `container-scan.yml` and `terraform-checks.yml` were fixed specifically to avoid ever reporting
 "skipped" for this reason — see the "Required-check gap closed" section of ADR 0002.
-<!-- F1 Phase D2 harmless develop->staging promotion test content -->
