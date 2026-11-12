@@ -1,0 +1,64 @@
+{
+  "rules": [
+    {
+      "pattern": "internal/api/**/*.go",
+      "area": "API reference",
+      "doc_path": "docs/generated/API.md",
+      "kind": "generated"
+    },
+    {
+      "pattern": "cmd/**/*.go",
+      "area": "Application entrypoint / startup behavior",
+      "doc_path": "README.md",
+      "kind": "manual"
+    },
+    {
+      "pattern": "databases/**",
+      "area": "Database schema",
+      "doc_path": "docs/DATABASE.md",
+      "kind": "manual"
+    },
+    {
+      "pattern": "infrastructure/terraform/**",
+      "area": "Infrastructure (Terraform)",
+      "doc_path": "infrastructure/terraform/aws-s3-sandbox/README.md",
+      "kind": "manual"
+    },
+    {
+      "pattern": ".github/workflows/**",
+      "area": "CI/CD workflows",
+      "doc_path": "docs/generated/CI_WORKFLOWS.md",
+      "kind": "generated"
+    },
+    {
+      "pattern": "Dockerfile",
+      "area": "Container build",
+      "doc_path": "README.md",
+      "kind": "manual"
+    },
+    {
+      "pattern": "compose.yaml",
+      "area": "Local environment",
+      "doc_path": "README.md",
+      "kind": "manual"
+    },
+    {
+      "pattern": ".github/CODEOWNERS",
+      "area": "Review ownership",
+      "doc_path": "CONTRIBUTING.md",
+      "kind": "manual"
+    },
+    {
+      "pattern": "SECURITY.md",
+      "area": "Security policy",
+      "doc_path": "SECURITY.md",
+      "kind": "manual"
+    },
+    {
+      "pattern": "CLAUDE.md",
+      "area": "AI assistant working agreement",
+      "doc_path": "CLAUDE.md",
+      "kind": "manual"
+    }
+  ]
+}
