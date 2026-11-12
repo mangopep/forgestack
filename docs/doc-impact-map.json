@@ -49,6 +49,12 @@
       "kind": "generated"
     },
     {
+      "pattern": ".golangci.yml",
+      "area": "Code review / lint strategy",
+      "doc_path": "docs/AUTOMATED-CODE-REVIEW.md",
+      "kind": "manual"
+    },
+    {
       "pattern": "Dockerfile",
       "area": "Container build",
       "doc_path": "README.md",

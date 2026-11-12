@@ -17,6 +17,15 @@ jobs:
       - uses: reviewdog/action-golangci-lint@284129a3ac23bc5d8ac1522e0b6511df74a8836d # v2
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          # Pinned explicitly: this action defaults to "latest" if omitted,
+          # which is an unpinned, silently-movable dependency on CI's lint
+          # behavior — the same supply-chain concern already applied to
+          # every other third-party Action in this repo.
+          golangci_lint_version: 'v2.15.0'
+          # github-pr-check posts inline Check annotations (GitHub Checks
+          # API), not PR conversation comments — this is what avoids
+          # duplicate/spammy bot comments across re-runs. Do not change to
+          # github-pr-review without re-verifying that.
           reporter: github-pr-check
           fail_level: any
           golangci_lint_flags: '--timeout=5m'

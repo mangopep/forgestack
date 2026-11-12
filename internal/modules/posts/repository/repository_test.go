@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -30,7 +31,7 @@ func TestInMemoryAddPropagatesBuildError(t *testing.T) {
 	_, err := r.Add(ctx, func(id int64) (domain.Post, error) {
 		return domain.NewPost(id, "", "b", time.Now()) // invalid: empty author
 	})
-	if err != domain.ErrAuthorRequired {
+	if !errors.Is(err, domain.ErrAuthorRequired) {
 		t.Fatalf("expected ErrAuthorRequired, got %v", err)
 	}
 	if got := r.List(ctx, 10); len(got) != 0 {

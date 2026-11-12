@@ -72,7 +72,7 @@ func TestMatchReport(t *testing.T) {
 func TestLoadImpactMapRejectsBadConfig(t *testing.T) {
 	dir := t.TempDir()
 	badFile := filepath.Join(dir, "bad.json")
-	if err := os.WriteFile(badFile, []byte(`{"rules":[{"pattern":"x","area":"y","doc_path":"z","kind":"not-a-real-kind"}]}`), 0o644); err != nil {
+	if err := os.WriteFile(badFile, []byte(`{"rules":[{"pattern":"x","area":"y","doc_path":"z","kind":"not-a-real-kind"}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := LoadImpactMap(badFile); err == nil {
@@ -166,13 +166,13 @@ func TestSummarizeWorkflowsFromRealDir(t *testing.T) {
 
 func TestCheckLinks(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "real.md"), []byte("placeholder"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "real.md"), []byte("placeholder"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	good := "[ok](real.md)\n[external](https://example.com)\n[anchor](#section)\n"
 	bad := good + "[broken](does-not-exist.md)\n"
 
-	if err := os.WriteFile(filepath.Join(dir, "good.md"), []byte(good), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "good.md"), []byte(good), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	broken, err := CheckLinks(dir)
@@ -183,7 +183,7 @@ func TestCheckLinks(t *testing.T) {
 		t.Fatalf("expected no broken links in good.md, got %+v", broken)
 	}
 
-	if err := os.WriteFile(filepath.Join(dir, "bad.md"), []byte(bad), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "bad.md"), []byte(bad), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	broken, err = CheckLinks(dir)

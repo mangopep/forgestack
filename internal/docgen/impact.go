@@ -33,6 +33,9 @@ type ImpactMap struct {
 
 // LoadImpactMap reads and parses the impact map configuration file.
 func LoadImpactMap(path string) (ImpactMap, error) {
+	//nolint:gosec // G304: path is this CLI's own repo-relative config path
+	// argument (default docs/doc-impact-map.json), supplied by a trusted
+	// local developer or CI step, not untrusted network input.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return ImpactMap{}, fmt.Errorf("read impact map: %w", err)

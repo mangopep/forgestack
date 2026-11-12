@@ -17,11 +17,21 @@ jobs:
         with:
           go-version: '1.27.4'
       - name: Formatting check
-        run: test -z "$(gofmt -l cmd internal)"
+        run: test -z "$(gofmt -l cmd internal tests)"
       - name: Static analysis
         run: go vet ./...
-      - name: Tests with race detector
-        run: go test -race -cover ./...
+      - name: Lint (duplication, complexity, concurrency, error handling, security)
+        # Runs for every PR including forks (ci.yml needs no elevated
+        # permissions for this) — the only enforced lint path for external
+        # contributors. automated-review.yml's reviewdog step additionally
+        # posts inline annotations, but only for same-repo PRs.
+        uses: golangci/golangci-lint-action@d583c34f0599d37dbac4a198b9c83201be380893 # v9.3.0
+        with:
+          version: 'v2.15.0'
+      - name: Tests with race detector and coverage report
+        run: |
+          go test -race -coverprofile=coverage.out -covermode=atomic ./...
+          go tool cover -func=coverage.out | tail -1
       - name: Build API
         run: go build ./cmd/api
   security-baseline:
