@@ -85,4 +85,10 @@ something this work introduced, and so it isn't silently lost either.
   tested.
 - New: `website/sidebars.js` reorganized into the 12-category IA.
 - New: local search (`@easyops-cn/docusaurus-search-local`, build-time index, no paid SaaS).
+- New: `website/static/img/forgestack-banner.svg`, a tracked **copy** of
+  `docs/assets/forgestack-banner.svg` for the navbar logo — a symlink was tried first and
+  rejected during hardening review: Windows clones without `core.symlinks` enabled would get a
+  broken logo (a text file holding the link target, not the image). This is the one deliberate
+  exception to "never duplicate" in this ADR, and it's a binary image asset, not documentation
+  content — the two files must be kept identical by hand if the banner ever changes.
 - No workflow file's trigger, permission, or required-check name changed.

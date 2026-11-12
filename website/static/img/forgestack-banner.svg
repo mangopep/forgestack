@@ -1,1 +1,10 @@
-../../../docs/assets/forgestack-banner.svg
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="340" viewBox="0 0 960 340" role="img" aria-labelledby="title desc">
+<title id="title">ForgeStack cloud engineering lab</title>
+<desc id="desc">A layered cloud symbol above the words build, test, observe, secure on a dark blue background.</desc>
+<defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#0b1224"/><stop offset="1" stop-color="#172c46"/></linearGradient><linearGradient id="accent" x2="1" y2="1"><stop stop-color="#67e8f9"/><stop offset="1" stop-color="#818cf8"/></linearGradient></defs>
+<rect width="960" height="340" rx="24" fill="url(#bg)"/>
+<g fill="none" stroke="#263e59" stroke-width="1"><path d="M0 85h960M0 170h960M0 255h960M160 0v340M320 0v340M480 0v340M640 0v340M800 0v340"/></g>
+<g transform="translate(410 35)" stroke="url(#accent)" stroke-width="5" stroke-linejoin="round"><path d="M28 93C-3 93-6 49 22 44 28 6 83 3 97 39 137 29 153 91 113 93Z" fill="#142a43"/><path d="m29 112 41 21 41-21M29 130l41 21 41-21" fill="none"/></g>
+<text x="480" y="242" text-anchor="middle" fill="#f1f5f9" font-family="Arial,Helvetica,sans-serif" font-size="60" font-weight="700" letter-spacing="-2">ForgeStack</text>
+<text x="480" y="285" text-anchor="middle" fill="#a5c5df" font-family="Arial,Helvetica,sans-serif" font-size="17" letter-spacing="4">BUILD · TEST · OBSERVE · SECURE</text>
+</svg>

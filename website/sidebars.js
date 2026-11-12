@@ -12,7 +12,15 @@ const sidebars = {
     {
       type: 'category',
       label: 'Getting Started',
-      items: ['ROADMAP'],
+      items: [
+        'ROADMAP',
+        // Explicit label to disambiguate from "Command reference (generated)"
+        // under Platform — same word, two different purposes (a hand-written
+        // teaching glossary here vs. a generated Makefile-target reference
+        // there). This page existed before F2 but had no sidebar entry at
+        // all until this hardening pass found it.
+        { type: 'doc', id: 'COMMANDS', label: 'Command glossary (lab teaching reference)' },
+      ],
     },
     {
       type: 'category',
@@ -33,7 +41,10 @@ const sidebars = {
     {
       type: 'category',
       label: 'Platform',
-      items: ['generated/COMMANDS', 'generated/CONFIG'],
+      items: [
+        { type: 'doc', id: 'generated/COMMANDS', label: 'Command reference (generated)' },
+        { type: 'doc', id: 'generated/CONFIG', label: 'Environment variable reference (generated)' },
+      ],
     },
     {
       type: 'category',

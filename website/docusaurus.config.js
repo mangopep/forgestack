@@ -77,10 +77,14 @@ const config = {
     navbar: {
       title: 'ForgeStack',
       logo: {
-        // static/img/forgestack-banner.svg is a symlink to docs/assets/ —
-        // Docusaurus's navbar logo must resolve under static/, but the
-        // actual file still lives in exactly one place (docs/assets/),
-        // never duplicated. See docs/adr/0003-documentation-as-code.md.
+        // static/img/forgestack-banner.svg is a tracked copy of
+        // docs/assets/forgestack-banner.svg (Docusaurus's navbar logo must
+        // resolve under static/). A symlink was tried first but rejected —
+        // Windows clones without core.symlinks enabled would get a broken
+        // logo (a text file containing the link target, not the image).
+        // Keep these two files identical by hand if the banner changes;
+        // see docs/handbook/DOCS-DEVELOPMENT.md and
+        // docs/adr/0003-documentation-as-code.md.
         alt: 'ForgeStack',
         src: 'img/forgestack-banner.svg',
       },

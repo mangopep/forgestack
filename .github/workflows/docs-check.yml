@@ -17,6 +17,9 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.4'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
 
       - name: Regenerate deterministic docs
         run: go run ./cmd/docgen generate all
@@ -31,6 +34,14 @@ jobs:
 
       - name: Check for broken relative Markdown links
         run: go run ./cmd/docgen checklinks .
+
+      - name: Validate every Mermaid diagram actually parses and renders
+        # Mermaid diagrams render client-side only (see
+        # docs/handbook/DOCS-DEVELOPMENT.md) — a successful `docusaurus
+        # build` proves the page built, not that the diagram syntax inside
+        # it is valid Mermaid. This independently renders every ```mermaid
+        # block with the real mermaid-cli parser/renderer.
+        run: scripts/validate-mermaid.sh
 
       - name: Report documentation impact (advisory for manual-kind areas)
         if: github.event_name == 'pull_request'
