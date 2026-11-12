@@ -7,24 +7,35 @@ package branchpolicy
 
 import "strings"
 
+// dependabotActor is the GitHub Actions actor login used for PRs that
+// Dependabot itself opens. Checked case-insensitively since GitHub's actor
+// field casing for bot accounts has varied historically.
+const dependabotActor = "dependabot[bot]"
+
 // Decision is the policy's verdict for one PR's head/base pair.
 type Decision struct {
 	Allowed bool
 	Reason  string
 }
 
-// Evaluate decides whether a pull request from headRef into baseRef is
-// permitted under the required flow. Branch names are compared exactly for
-// develop/staging/main, and by prefix for feature/, hotfix/, release/, and
-// dependabot/ branches.
-func Evaluate(headRef, baseRef string) Decision {
+// Evaluate decides whether a pull request from headRef into baseRef, opened
+// by actor, is permitted under the required flow. Branch names are compared
+// exactly for develop/staging/main, and by prefix for feature/, hotfix/,
+// release/, and dependabot/ branches.
+//
+// actor matters specifically for the Dependabot exemption below: a branch
+// *name* alone (e.g. "dependabot/x") is not trusted to prove the PR was
+// actually opened by Dependabot, because anyone — including a fork
+// contributor — can create a branch with any name they like. Requiring the
+// actor to also be Dependabot's own bot account closes that bypass.
+func Evaluate(headRef, baseRef, actor string) Decision {
 	// Automated dependency-update PRs (Dependabot) are exempt: they are not
 	// human feature work and, until develop becomes the default branch
 	// (a separate, approval-gated migration step), they target main by
 	// GitHub's own default-branch behavior. Revisit this exemption once
 	// dependabot.yml's target-branch is updated as part of that migration.
-	if strings.HasPrefix(headRef, "dependabot/") {
-		return Decision{true, "automated dependency-update PRs are exempt from branch-flow policy"}
+	if strings.HasPrefix(headRef, "dependabot/") && strings.EqualFold(actor, dependabotActor) {
+		return Decision{true, "automated dependency-update PRs opened by Dependabot are exempt from branch-flow policy"}
 	}
 
 	switch baseRef {

@@ -15,12 +15,17 @@ import (
 func main() {
 	head := firstNonEmpty(os.Getenv("HEAD_REF"), os.Getenv("GITHUB_HEAD_REF"))
 	base := firstNonEmpty(os.Getenv("BASE_REF"), os.Getenv("GITHUB_BASE_REF"))
+	// ACTOR has no GITHUB_ACTOR-shaped fallback requirement: an empty actor
+	// simply never matches the Dependabot exemption (strings.EqualFold with
+	// "" is false), which is the correct fail-closed behavior — it falls
+	// through to the normal policy instead of silently exempting anything.
+	actor := firstNonEmpty(os.Getenv("ACTOR"), os.Getenv("GITHUB_ACTOR"))
 	if head == "" || base == "" {
 		fmt.Fprintln(os.Stderr, "branchpolicy: HEAD_REF/BASE_REF (or GITHUB_HEAD_REF/GITHUB_BASE_REF) must both be set")
 		os.Exit(2)
 	}
 
-	decision := branchpolicy.Evaluate(head, base)
+	decision := branchpolicy.Evaluate(head, base, actor)
 	if decision.Allowed {
 		fmt.Printf("branchpolicy: ALLOWED — %q -> %q: %s\n", head, base, decision.Reason)
 		return

@@ -30,6 +30,41 @@ written in a README that nothing checks.
   an earlier session) to require "at least 1 approving review," but its exact required-status-
   check list could not be read. This ADR does not claim to know that list.
 
+### Re-audit (Phase F1, same session, after the first version of this ADR)
+
+- **Worktrees, status, stash**: `git worktree list` shows a single worktree; `git status` is
+  clean (after committing the required-check-gap fix below); `git stash list` is empty. No
+  uncommitted or stashed work exists anywhere to lose.
+- **Local branches with unmerged commits** (confirmed via `git log main..<branch> --oneline`,
+  none deleted, none force-pushed): `feature/strengthen-golangci-lint` (7 commits),
+  `feature/doc-automation-stage-ab` (2 commits), `feature/docs-website`,
+  `feature/gitflow-branch-policy`, `feature/gokit-posts-milestone-a`, `feature/readme-badges`,
+  `fix/activate-codeowners`, `fix/dependabot-codeql-action-grouping`,
+  `fix/dependabot-website-grouping` (1 commit each). All preserved, untouched.
+- **`feature/doc-automation-stage-ab` specifically**: inspected per instruction. It predates
+  ADR 0001's go-kit posts refactor — its diff against current `main` *removes*
+  `internal/modules/posts/*` and replaces it with an older `internal/api/api.go` design. This
+  branch is not just unmerged, it is **architecturally superseded**: merging it as-is today
+  would regress the posts module to a design `main` already moved past. It is preserved
+  (nothing deleted), but flagged here so it is not merged by assumption later. Its
+  documentation-automation content (impact detection + generation) is already superseded too —
+  `internal/docgen`/`cmd/docgen` on `main` is the actively-maintained descendant of that work.
+- **CODEOWNERS**: confirmed from code (`.github/CODEOWNERS`) — `* @mangopep`, a single default
+  owner, already active. This is the fact behind the solo-maintainer review-honesty decision
+  below.
+- **`gh` CLI**: still not authenticated in this session (`gh auth status` → "not logged into
+  any GitHub hosts"). Open PRs and live rulesets remain unverifiable through this tool for now;
+  `git fetch`/`git push` work independently via the repository's own SSH key. The branch
+  carrying this work (`test-rebase-gitflow`) was pushed to `origin` with explicit user approval;
+  no PR has been confirmed opened or merged by this session.
+- **Live confirmation that the policy actually blocks**: a real GitHub Actions run against the
+  pushed `test-rebase-gitflow` branch (base `main`) reported `branchpolicy: BLOCKED` with exit
+  code 1 — this is the policy's own bootstrap PR being correctly rejected, since `test-rebase-
+  gitflow` is neither `staging` nor `hotfix/*`. Expected and documented, not a defect: the
+  `branch-policy.yml` check is not yet a *required* ruleset check, so this red status does not
+  block the maintainer from merging this one bootstrap PR. It will not recur once `develop`/
+  `staging` exist and subsequent PRs flow through them normally.
+
 ## Decision: the flow, and what enforces it
 
 ```
@@ -58,7 +93,8 @@ the executable version of this table):
 | `hotfix/*` | `main` | Yes — **documented exception**, see below |
 | `hotfix/*` | `develop` | Yes — the required backport |
 | anything else | `main` | **No** |
-| `dependabot/*` | anything | Yes — exempt, see "Dependabot" below |
+| `dependabot/*` **and** PR actor is `dependabot[bot]` | anything | Yes — exempt, see "Dependabot" below |
+| `dependabot/*` opened by anyone else (spoofed branch name) | anything | **No** — falls through to the normal rules above |
 
 **Hotfix exception, explicit**: a `hotfix/*` branch may target `main` directly for urgent
 production fixes, bypassing `develop`/`staging`. This is **not** a loophole — the policy
@@ -73,38 +109,83 @@ branch (`main`, until the default-branch migration below happens) and this polic
 block those PRs. If `develop` becomes the default branch, `dependabot.yml`'s `target-branch`
 should be set explicitly — tracked as a step in the migration plan below, not done yet.
 
+**Dependabot exemption is actor-checked, not just branch-name-checked**: the first version of
+this policy exempted any branch named `dependabot/*` from every rule, including direct access
+to `main`. That is a bypass: nothing stops a fork contributor from naming their own branch
+`dependabot/anything` and opening a PR straight into `main` to skip the entire policy. Fixed by
+requiring the PR's actual author (`github.event.pull_request.user.login`, passed as `ACTOR`) to
+also equal `dependabot[bot]` (case-insensitive) before the exemption applies — see
+`internal/branchpolicy/policy_test.go`'s "spoofed dependabot branch name" cases, which assert
+the spoofed PR is correctly rejected, not silently let through.
+
 ## Ruleset specification (documented, NOT applied)
 
 The following is the intended GitHub ruleset/branch-protection configuration for each branch.
 **None of this has been created or changed on GitHub.** It is written out precisely so that
 when you approve it, the exact `gh api` commands are ready, not improvised.
 
+### Review requirement, stated honestly for a solo maintainer
+
+`mangopep` is the sole maintainer and the sole CODEOWNERS entry (`.github/CODEOWNERS`: `* @mangopep`).
+Setting "require 1 approving review" in a ruleset while the only account that can approve is the
+PR's own author produces one of two outcomes, and this ADR picks one explicitly rather than
+leaving it to be discovered later:
+
+- If GitHub rulesets are configured to allow the author to approve their own PR (some review
+  settings permit this), the "required review" is **not independent review** — it is the same
+  person clicking a second button. Listing this as "1 approving review required" without that
+  caveat would misrepresent what actually protects `main`.
+- If self-approval is disallowed (GitHub's default for *required reviewers*, though plain
+  "required approving review count" on rulesets does not by itself block the author from
+  approving their own PR — this is configuration-dependent and must be verified against the
+  live ruleset UI at apply time, not assumed from this document), every solo PR blocks forever
+  with no second person able to unblock it.
+
+**Decision**: do not set a required-approving-review-count ruleset rule on any of the three
+branches while there is one maintainer. Rely instead on what is genuinely independent of the
+PR author's opinion: the CI status checks below (a human cannot talk a failing `go test` into
+passing), CODEOWNERS routing (documents who is responsible, even though today that's one
+person), and the branch-policy check (structural, not a judgment call). If a second maintainer
+joins, revisit this and turn required review back on — tracked as a follow-up, not assumed to
+happen automatically.
+
 ### `main`
-- Require a pull request before merging; require 1 approving review.
+- Require a pull request before merging. **No required-approving-review-count** — see above.
 - Require these status checks to pass before merging (exact job names from the existing
   workflow files): `go-quality`, `security-baseline` (`ci.yml`); `analyze` (`codeql.yml`);
   `gitleaks` (`secret-scan.yml`); `trivy-image` (`container-scan.yml`); `validate`
   (`terraform-checks.yml`); `docs` (`docs-check.yml`); `check` (`branch-policy.yml`).
 - Require branches to be up to date before merging.
+- Require a linear commit history (no merge commits landing on `main` — every promotion is a
+  fast-forward-shaped PR merge, which keeps "staging passed" meaning "this exact commit passed,"
+  consistent with the promote-the-same-commit principle in "Why promote through three branches"
+  in `docs/handbook/BRANCHING.md`).
+- Require all PR review threads to be resolved before merging (closes the gap where an open,
+  unaddressed comment gets silently merged past).
 - Block force pushes. Block branch deletion. Require CODEOWNERS review (already active per
-  ADR 0001's follow-up work).
+  ADR 0001's follow-up work) — in practice this still resolves to the same one person today;
+  recorded honestly, not inflated into "independent code owner sign-off."
 - Allowed merge sources (once `branchpolicy` enforcement is a required check): `staging`,
   `hotfix/*`.
 
 ### `staging`
-- Require a pull request before merging; require 1 approving review.
+- Require a pull request before merging. No required-approving-review-count, same reasoning.
 - Require the same CI status checks as `main` (identical code should pass identical checks at
   every promotion stage — that's the point of promoting a build, not re-building it
   differently per environment).
+- Require a linear commit history and resolved review conversations, same as `main`.
 - Block force pushes. Block branch deletion.
 - Allowed merge sources (enforced): `develop`, `release/*`.
 
 ### `develop`
-- Require a pull request before merging; require 1 approving review.
+- Require a pull request before merging. No required-approving-review-count, same reasoning.
 - Require the same CI status checks (`go-quality`, `security-baseline`, `analyze`, `gitleaks`,
   `docs`, `check`, `trivy-image`, `validate` — all run unconditionally on every PR; see
   "Required-check gap closed" below for why `trivy-image`/`validate` no longer use `paths:`
   filters).
+- Require resolved review conversations. Linear history is recommended but not required on
+  `develop` specifically — day-to-day integration work may legitimately merge commits here; it
+  becomes required again from `staging` onward.
 - Block force pushes. Block branch deletion.
 - Allowed merge sources (enforced): `feature/*`, `fix/*`, `hotfix/*` (backport), anything else
   not otherwise restricted.
@@ -113,17 +194,23 @@ when you approve it, the exact `gh api` commands are ready, not improvised.
 
 ```bash
 # Example for main; staging/develop follow the same shape with their own
-# allowed-merge-source lists per the table above.
+# allowed-merge-source lists per the table above. required_approving_review_count
+# is deliberately 0, not 1 — see "Review requirement, stated honestly for a solo
+# maintainer" above for why.
 gh api repos/mangopep/forgestack/rulesets --method POST -f name='main-protection' \
   -f target='branch' -f enforcement='active' \
   -F conditions[ref_name][include][]='refs/heads/main' \
   -f rules[0][type]='pull_request' \
-  -F rules[0][parameters][required_approving_review_count]=1 \
+  -F rules[0][parameters][required_approving_review_count]=0 \
+  -F rules[0][parameters][require_resolution_of_review_comments]=true \
   -f rules[1][type]='required_status_checks' \
   -F 'rules[1][parameters][required_status_checks][][context]=go-quality' \
   # ... (one entry per required check; full command assembled at approval time,
   #     not guessed now — exact context strings will be re-verified against
   #     the live Checks API output at that time, not copied from this draft).
+  -f rules[2][type]='required_linear_history' \
+  -f rules[3][type]='non_fast_forward' \
+  -f rules[4][type]='deletion'
 ```
 
 This ADR intentionally does not pretend to have the full, final `gh api` invocation ready

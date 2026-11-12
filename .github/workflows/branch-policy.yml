@@ -19,4 +19,9 @@ jobs:
         env:
           HEAD_REF: ${{ github.head_ref }}
           BASE_REF: ${{ github.base_ref }}
+          # The actual PR author's login, not the workflow's run actor —
+          # used only to confirm a dependabot/* branch was genuinely opened
+          # by Dependabot before exempting it. github.actor would report
+          # whoever triggered re-runs/edits, which is not the same thing.
+          ACTOR: ${{ github.event.pull_request.user.login }}
         run: go run ./cmd/branchpolicy

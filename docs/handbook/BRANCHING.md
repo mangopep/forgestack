@@ -47,7 +47,30 @@ A `hotfix/*` branch may target `main` directly, skipping `develop`/`staging`, fo
 urgent production fixes. This is the only exception. **It does not backport itself** — after
 the hotfix lands on `main`, open a second PR from the same `hotfix/*` branch into `develop` so
 the fix isn't lost the next time `develop` is promoted. The branch-policy check explicitly
-permits that backport PR.
+permits that backport PR. See `docs/handbook/EMERGENCY-HOTFIX.md` for the full step-by-step
+procedure, including exact commands explained in plain English.
+
+## If a check fails on your PR
+
+See `docs/handbook/CI-TROUBLESHOOTING.md` — it lists every required check, what it verifies,
+the most common cause of failure, and how to reproduce it locally before pushing again.
+
+## Review requirement (stated honestly)
+
+There is currently one maintainer (`@mangopep`, also the sole `CODEOWNERS` entry). Branch
+protection on `develop`/`staging`/`main` deliberately does **not** set a required-approving-
+review count — a solo maintainer "approving" their own PR would not be independent review, and
+pretending otherwise would misrepresent what's actually protecting these branches. What
+protects them instead: the CI status checks (a human can't talk a failing test into passing),
+resolved-review-conversation requirements, and the branch-policy structural check. See
+"Review requirement, stated honestly for a solo maintainer" in ADR 0002 for the full reasoning
+and what changes if a second maintainer joins.
+
+## Release promotion, once this exists
+
+`docs/handbook/RELEASE-WORKFLOW.md` documents the intended `develop → staging → main` release
+sequence and what "immutable, versioned artifact" will mean once that pipeline is built — not
+yet implemented, foundation only.
 
 ## Why promote through three branches instead of just `main`
 
