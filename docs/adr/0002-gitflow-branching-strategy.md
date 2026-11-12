@@ -102,7 +102,9 @@ when you approve it, the exact `gh api` commands are ready, not improvised.
 ### `develop`
 - Require a pull request before merging; require 1 approving review.
 - Require the same CI status checks (`go-quality`, `security-baseline`, `analyze`, `gitleaks`,
-  `docs`, `check`; `trivy-image`/`validate` only when their path filters match).
+  `docs`, `check`, `trivy-image`, `validate` — all run unconditionally on every PR; see
+  "Required-check gap closed" below for why `trivy-image`/`validate` no longer use `paths:`
+  filters).
 - Block force pushes. Block branch deletion.
 - Allowed merge sources (enforced): `feature/*`, `fix/*`, `hotfix/*` (backport), anything else
   not otherwise restricted.
@@ -167,6 +169,28 @@ them now would violate "work incrementally" and "do not provision infrastructure
 releases without approval." Proposed as the next milestone once the branch migration above is
 approved and executed.
 
+## Required-check gap closed: missing/skipped checks must not silently satisfy a mandatory gate
+
+`container-scan.yml` (`trivy-image`) and `terraform-checks.yml` (`validate`) originally used a
+workflow-level `on: pull_request: paths: [...]` filter. That is a real gap for a **required**
+status check: when a PR doesn't touch any of the filtered paths, GitHub never runs the workflow
+at all, so the check context is never reported. Depending on repository/ruleset settings this
+either blocks the merge forever waiting on a status that will never arrive, or — for rulesets
+configured to not wait on checks that have no history on the PR — is treated as satisfied
+despite never actually running. Neither behavior is acceptable for a mandatory gate.
+
+Fix applied (uncommitted at ADR-writing time, included in this change): both workflows now
+trigger on every `pull_request` and `push` to `[main, staging, develop]` with no path filter at
+the `on:` level. Relevance is instead decided **inside** the job, in a "Detect relevant changes"
+step that diffs the PR's base...head range (or push's before...after range) against the
+same path list that used to live in `on.paths`. If the diff shows no relevant files changed, the
+job runs an explicit "no relevant changes — explicit pass" step instead of the real
+build/scan/validate steps, so the job still reports a real `success`, never a skip or a missing
+check. If the diff itself cannot be computed (e.g. an unresolvable ref), the step fails safe by
+scanning/validating anyway rather than silently passing. This means `trivy-image` and `validate`
+are now unconditionally safe to list as required status checks on `main`, `staging`, and
+`develop` — not contingent on path filters the way the earlier draft of this ADR assumed.
+
 ## Consequences
 
 - New package: `internal/branchpolicy` (pure logic, zero dependencies, unit-tested).
@@ -174,4 +198,7 @@ approved and executed.
 - Existing workflows (`ci.yml`, `codeql.yml`, `container-scan.yml`, `docs-check.yml`,
   `secret-scan.yml`) extended to also trigger on push to `develop`/`staging` — inert today
   since those branches don't exist yet, becomes active the moment they're created.
+- `container-scan.yml` and `terraform-checks.yml` lost their workflow-level `on.paths` filters
+  and gained an in-job "Detect relevant changes" step instead, so `trivy-image` and `validate`
+  always report a real success/failure and can safely be required checks (see above).
 - No change to `main`'s current behavior, protection, or required checks in this PR.
