@@ -1,0 +1,46 @@
+# golangci-lint v2 config. Pin golangci_lint_version to match in
+# .github/workflows/automated-review.yml — this file's schema is v2-only
+# and will not work with golangci-lint v1.
+#
+# Every linter below is free, open-source, and bundled inside golangci-lint
+# itself (MIT/BSD-licensed) — no paid service, no API key, no network call
+# to a model. See docs/CODE-REVIEW-STRATEGY.md for the audit and rationale
+# behind this specific set.
+version: "2"
+
+linters:
+  enable:
+    # Already-enabled defaults, kept explicit so this file is the single
+    # source of truth for what's on.
+    - errcheck     # unchecked error return values
+    - govet        # suspicious constructs; includes copylocks (real
+                    # concurrency-correctness bugs: passing a sync.Mutex by
+                    # value instead of by pointer)
+    - ineffassign  # assignments that are never used
+    - staticcheck  # broad correctness/style rule set
+    - unused       # dead code
+
+    # Added by this audit.
+    - dupl         # duplicated code fragments (default ~150-token threshold)
+    - gocyclo      # cyclomatic complexity
+    - gosec        # security-focused static analysis, complements CodeQL
+                    # (different rule engine/focus: file perms, command
+                    # injection shapes, weak crypto, etc.)
+    - bodyclose    # unclosed net/http response bodies (resource leak)
+    - contextcheck # context.Context propagated correctly, not a fresh
+                    # context.Background() where the caller's should flow
+    - errorlint    # error-wrapping-safe comparisons (errors.Is/As, not ==/!=)
+
+  settings:
+    gocyclo:
+      # Measured, not arbitrary: the real codebase's current max cyclomatic
+      # complexity is 12 (internal/modules/posts/..., measured 2026-11-12).
+      # 15 gives headroom above that measured max while still catching
+      # complexity growth beyond what's already been reviewed and merged.
+      min-complexity: 15
+    dupl:
+      # Measured, not the tool's default (150): verified with an injected
+      # ~29-line duplicated function (see this change's PR description) that
+      # the default 150-token threshold missed entirely but 100 caught
+      # cleanly. 100 still passes 0 issues against this repo's real code.
+      threshold: 100

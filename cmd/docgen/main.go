@@ -98,10 +98,10 @@ func generateAPI() error {
 		return err
 	}
 	md := docgen.RenderAPIMarkdown(routes, src)
-	if err := os.MkdirAll("docs/generated", 0o755); err != nil {
+	if err := os.MkdirAll("docs/generated", 0o750); err != nil {
 		return err
 	}
-	return os.WriteFile("docs/generated/API.md", []byte(md), 0o644)
+	return os.WriteFile("docs/generated/API.md", []byte(md), 0o600)
 }
 
 func generateCI() error {
@@ -110,10 +110,10 @@ func generateCI() error {
 		return err
 	}
 	md := docgen.RenderCIMarkdown(summaries)
-	if err := os.MkdirAll("docs/generated", 0o755); err != nil {
+	if err := os.MkdirAll("docs/generated", 0o750); err != nil {
 		return err
 	}
-	return os.WriteFile("docs/generated/CI_WORKFLOWS.md", []byte(md), 0o644)
+	return os.WriteFile("docs/generated/CI_WORKFLOWS.md", []byte(md), 0o600)
 }
 
 func runCheckLinks(args []string) error {

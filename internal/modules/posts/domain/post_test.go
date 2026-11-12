@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -40,7 +41,7 @@ func TestNewPostValidation(t *testing.T) {
 			if c.wantErr == nil && err != nil {
 				t.Fatalf("expected no error, got %v", err)
 			}
-			if c.wantErr != nil && err != c.wantErr {
+			if c.wantErr != nil && !errors.Is(err, c.wantErr) {
 				t.Fatalf("expected %v, got %v", c.wantErr, err)
 			}
 		})

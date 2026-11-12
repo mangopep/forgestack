@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -50,7 +51,7 @@ func TestCreatePost(t *testing.T) {
 func TestCreatePostValidationError(t *testing.T) {
 	svc := New(&fakeRepository{}, nil)
 	_, err := svc.CreatePost(context.Background(), "", "hello")
-	if err != domain.ErrAuthorRequired {
+	if !errors.Is(err, domain.ErrAuthorRequired) {
 		t.Fatalf("expected ErrAuthorRequired, got %v", err)
 	}
 	if !IsValidationError(err) {
@@ -79,7 +80,7 @@ func TestListPostsRejectsOutOfRangeLimit(t *testing.T) {
 	svc := New(&fakeRepository{}, nil)
 	for _, limit := range []int{0, -2, 101, 1000} {
 		_, err := svc.ListPosts(context.Background(), limit)
-		if err != ErrInvalidLimit {
+		if !errors.Is(err, ErrInvalidLimit) {
 			t.Errorf("limit=%d: expected ErrInvalidLimit, got %v", limit, err)
 		}
 	}

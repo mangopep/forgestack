@@ -11,6 +11,10 @@ import (
 // rather than reimplementing diff logic, so results always match what git
 // itself reports.
 func ChangedFiles(repoDir, base, head string) ([]string, error) {
+	//nolint:gosec // G204: base/head come from this CLI's own flags (a trusted
+	// local developer or CI step invoking docgen, e.g. --base origin/main),
+	// not from untrusted network input; exec.Command never invokes a shell,
+	// so there is no shell-injection vector either way.
 	cmd := exec.Command("git", "diff", "--name-only", base+"..."+head)
 	cmd.Dir = repoDir
 	out, err := cmd.Output()

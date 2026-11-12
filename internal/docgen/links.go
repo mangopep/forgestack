@@ -33,6 +33,9 @@ func CheckLinks(root string) ([]BrokenLink, error) {
 		if info.IsDir() || !strings.HasSuffix(p, ".md") {
 			return nil
 		}
+		// p came from filepath.Walk over root (a trusted local repo path
+		// this CLI was pointed at), not from untrusted input.
+		//nolint:gosec // G304
 		content, err := os.ReadFile(p)
 		if err != nil {
 			return fmt.Errorf("read %s: %w", p, err)
@@ -49,6 +52,11 @@ func CheckLinks(root string) ([]BrokenLink, error) {
 					continue // pure in-page anchor
 				}
 				resolved := filepath.Join(dir, target)
+				// resolved is only ever stat'd (existence check), never
+				// opened/read/executed, so a crafted relative link can at
+				// most learn whether a path exists — no content is ever
+				// disclosed through this check.
+				//nolint:gosec // G703
 				if _, statErr := os.Stat(resolved); statErr != nil {
 					broken = append(broken, BrokenLink{File: p, Line: lineNo + 1, Target: m[1]})
 				}

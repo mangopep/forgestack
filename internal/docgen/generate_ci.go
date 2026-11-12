@@ -46,6 +46,10 @@ func SummarizeWorkflows(dir string) ([]WorkflowSummary, error) {
 
 	var out []WorkflowSummary
 	for _, name := range files {
+		// name came from os.ReadDir(dir) just above, not from untrusted
+		// input, so this is a closed set of real filenames, not a
+		// traversal vector.
+		//nolint:gosec // G304
 		content, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", name, err)
