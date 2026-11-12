@@ -1,0 +1,26 @@
+name: Container Image Scan (no push)
+on:
+  push:
+    branches: [main]
+    paths: ['Dockerfile', 'go.mod', 'go.sum', 'cmd/**', 'internal/**', '.github/workflows/container-scan.yml']
+  pull_request:
+    paths: ['Dockerfile', 'go.mod', 'go.sum', 'cmd/**', 'internal/**', '.github/workflows/container-scan.yml']
+permissions:
+  contents: read
+jobs:
+  trivy-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Build image locally (not pushed to any registry)
+        run: docker build -t forgestack:ci-scan .
+      - name: Scan built image for known vulnerabilities
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
+        with:
+          scan-type: image
+          image-ref: forgestack:ci-scan
+          exit-code: '1'
+          severity: HIGH,CRITICAL

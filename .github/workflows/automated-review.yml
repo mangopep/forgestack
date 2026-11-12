@@ -1,0 +1,33 @@
+name: Automated PR Code Reviewer
+on:
+  pull_request:
+permissions:
+  contents: read
+  checks: write
+jobs:
+  reviewdog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Avoid granting write privileges to untrusted fork code.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: reviewdog/action-golangci-lint@64a8423a076d3af085e45a50248210a6285937d0 # v2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          reporter: github-pr-check
+          fail_level: any
+          golangci_lint_flags: '--timeout=5m'
+      - name: Custom repository rules
+        run: python3 scripts/review_guard.py --ci
+  fork-safe-review:
+    if: github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Repository safety rules (no elevated token)
+        run: python3 scripts/review_guard.py --ci

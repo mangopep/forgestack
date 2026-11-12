@@ -1,0 +1,40 @@
+name: CI and Quality Gates
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  go-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.27.4'
+      - name: Formatting check
+        run: test -z "$(gofmt -l cmd internal)"
+      - name: Static analysis
+        run: go vet ./...
+      - name: Tests with race detector
+        run: go test -race -cover ./...
+      - name: Build API
+        run: go build ./cmd/api
+  security-baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Local secrets / risky config checks
+        run: python3 scripts/review_guard.py --ci
+      - name: Dependency vulnerability scan
+        uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1
+        with:
+          go-version-input: '1.27.4'
+          go-package: ./...

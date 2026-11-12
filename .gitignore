@@ -1,0 +1,22 @@
+.env
+.env.*
+!.env.example
+.DS_Store
+.idea/
+.vscode/
+coverage.out
+*.test
+bin/
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!.terraform.tfvars.example
+crash.log
+__pycache__/
+*.pyc
+
+# Claude personal configuration and session artifacts
+.claude/settings.local.json
+.claude/projects/
+.claude/todos/
