@@ -92,7 +92,7 @@ func runGenerate(args []string) error {
 }
 
 func generateAPI() error {
-	const src = "internal/api/api.go"
+	const src = "internal/platform/router/router.go"
 	routes, err := docgen.ExtractAPIRoutes(src)
 	if err != nil {
 		return err

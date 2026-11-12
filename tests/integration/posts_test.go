@@ -1,4 +1,8 @@
-package api
+// Package integration exercises the fully assembled application handler
+// (internal/platform/router.New()) with real HTTP requests — the same
+// scenarios the original single-file internal/api/api_test.go covered,
+// preserved here so the refactor is proven behavior-equivalent.
+package integration
 
 import (
 	"bytes"
@@ -6,11 +10,13 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+
+	"github.com/mangopep/forgestack/internal/platform/router"
 )
 
 func TestHealth(t *testing.T) {
 	r := httptest.NewRecorder()
-	NewHandler().ServeHTTP(r, httptest.NewRequest("GET", "/healthz", nil))
+	router.New().ServeHTTP(r, httptest.NewRequest("GET", "/healthz", nil))
 	if r.Code != 200 {
 		t.Fatalf("want 200, got %d", r.Code)
 	}
@@ -18,8 +24,20 @@ func TestHealth(t *testing.T) {
 		t.Fatal("missing JSON content type")
 	}
 }
+
+func TestReadyAndMetricsDemo(t *testing.T) {
+	h := router.New()
+	for _, path := range []string{"/readyz", "/metrics-demo"} {
+		r := httptest.NewRecorder()
+		h.ServeHTTP(r, httptest.NewRequest("GET", path, nil))
+		if r.Code != 200 {
+			t.Fatalf("%s: want 200, got %d", path, r.Code)
+		}
+	}
+}
+
 func TestPostLifecycle(t *testing.T) {
-	handler := NewHandler()
+	handler := router.New()
 	data := []byte(`{"author":"Nia","text":"hello Alex"}`)
 	r := httptest.NewRecorder()
 	handler.ServeHTTP(r, httptest.NewRequest("POST", "/api/v1/posts", bytes.NewReader(data)))
@@ -29,7 +47,9 @@ func TestPostLifecycle(t *testing.T) {
 	r = httptest.NewRecorder()
 	handler.ServeHTTP(r, httptest.NewRequest("GET", "/api/v1/posts?limit=1", nil))
 	var out struct {
-		Posts []post `json:"posts"`
+		Posts []struct {
+			Author string `json:"author"`
+		} `json:"posts"`
 	}
 	if err := json.Unmarshal(r.Body.Bytes(), &out); err != nil {
 		t.Fatal(err)
@@ -38,6 +58,7 @@ func TestPostLifecycle(t *testing.T) {
 		t.Fatalf("unexpected posts %+v", out.Posts)
 	}
 }
+
 func TestValidation(t *testing.T) {
 	for _, tt := range []struct{ method, path, body string }{
 		{"POST", "/api/v1/posts", `{"author":"","text":"ok"}`},
@@ -45,14 +66,15 @@ func TestValidation(t *testing.T) {
 		{"GET", "/api/v1/posts?limit=999", ""},
 	} {
 		r := httptest.NewRecorder()
-		NewHandler().ServeHTTP(r, httptest.NewRequest(tt.method, tt.path, bytes.NewBufferString(tt.body)))
+		router.New().ServeHTTP(r, httptest.NewRequest(tt.method, tt.path, bytes.NewBufferString(tt.body)))
 		if r.Code != 400 {
 			t.Fatalf("%s %s: want 400 got %d", tt.method, tt.path, r.Code)
 		}
 	}
 }
+
 func TestConcurrentRequests(t *testing.T) {
-	h := NewHandler()
+	h := router.New()
 	var wg sync.WaitGroup
 	for i := 0; i < 30; i++ {
 		wg.Add(1)
@@ -69,7 +91,9 @@ func TestConcurrentRequests(t *testing.T) {
 	r := httptest.NewRecorder()
 	h.ServeHTTP(r, httptest.NewRequest("GET", "/api/v1/posts?limit=100", nil))
 	var output struct {
-		Posts []post `json:"posts"`
+		Posts []struct {
+			Author string `json:"author"`
+		} `json:"posts"`
 	}
 	if err := json.Unmarshal(r.Body.Bytes(), &output); err != nil {
 		t.Fatal(err)

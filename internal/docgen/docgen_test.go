@@ -96,7 +96,7 @@ func TestExtractAPIRoutesFromRealSource(t *testing.T) {
 	// Exercises the actual internal/api/api.go, not a fixture, so this test
 	// fails the moment the generator can no longer read real route
 	// registrations correctly.
-	routes, err := ExtractAPIRoutes(filepath.Join("..", "api", "api.go"))
+	routes, err := ExtractAPIRoutes(filepath.Join("..", "platform", "router", "router.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,9 +116,14 @@ func TestExtractAPIRoutesFromRealSource(t *testing.T) {
 		}
 	}
 	for _, r := range routes {
-		if r.Method+" "+r.Path == "POST /api/v1/posts" {
+		if r.Method+" "+r.Path == "GET /healthz" {
 			if len(r.StatusCodes) == 0 {
-				t.Error("expected POST /api/v1/posts to have observed status codes extracted")
+				t.Error("expected GET /healthz (an inline handler) to have observed status codes extracted")
+			}
+		}
+		if r.Method+" "+r.Path == "POST /api/v1/posts" {
+			if len(r.StatusCodes) != 0 {
+				t.Error("POST /api/v1/posts is now a mux.Handle(..., expr) call, not a func literal — status codes cannot be extracted without cross-package analysis, so this must be empty")
 			}
 		}
 	}

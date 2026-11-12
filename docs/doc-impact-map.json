@@ -1,10 +1,28 @@
 {
   "rules": [
     {
-      "pattern": "internal/api/**/*.go",
-      "area": "API reference",
+      "pattern": "internal/platform/router/**/*.go",
+      "area": "API reference (composition root)",
       "doc_path": "docs/generated/API.md",
       "kind": "generated"
+    },
+    {
+      "pattern": "internal/modules/**/*.go",
+      "area": "Module business logic (domain/service/endpoint/transport/repository)",
+      "doc_path": "docs/generated/API.md",
+      "kind": "manual"
+    },
+    {
+      "pattern": "docs/adr/**",
+      "area": "Architecture decision records",
+      "doc_path": "docs/adr/",
+      "kind": "manual"
+    },
+    {
+      "pattern": "internal/modules/posts/**/*.go",
+      "area": "Posts module architecture diagram",
+      "doc_path": "docs/architecture/posts-module.md",
+      "kind": "manual"
     },
     {
       "pattern": "cmd/**/*.go",

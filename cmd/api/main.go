@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mangopep/forgestack/internal/api"
+	"github.com/mangopep/forgestack/internal/platform/router"
 )
 
 func main() {
@@ -20,7 +20,7 @@ func main() {
 	}
 	server := &http.Server{
 		Addr:              ":" + port,
-		Handler:           api.NewHandler(),
+		Handler:           router.New(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,
