@@ -1,0 +1,61 @@
+name: Documentation Checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.27.4'
+
+      - name: Regenerate deterministic docs
+        run: go run ./cmd/docgen generate all
+
+      - name: Fail if generated docs are stale (source changed, docs didn't)
+        run: |
+          if ! git diff --exit-code -- docs/generated; then
+            echo "::error::Generated documentation under docs/generated/ is out of sync with its source."
+            echo "::error::Run 'go run ./cmd/docgen generate all' locally and commit the result."
+            exit 1
+          fi
+
+      - name: Check for broken relative Markdown links
+        run: go run ./cmd/docgen checklinks .
+
+      - name: Report documentation impact (advisory for manual-kind areas)
+        if: github.event_name == 'pull_request'
+        run: |
+          go run ./cmd/docgen impact --base "origin/${{ github.event.pull_request.base.ref }}" --head "${{ github.event.pull_request.head.sha }}" > impact.json
+          cat impact.json
+          python3 - <<'PYEOF'
+          import json
+          with open("impact.json") as f:
+              report = json.load(f)
+          summary_path = __import__("os").environ.get("GITHUB_STEP_SUMMARY")
+          lines = ["### Documentation impact report", ""]
+          if not report["impacted_areas"]:
+              lines.append("No documentation areas impacted by this change.")
+          else:
+              lines.append("| Area | Doc | Kind | Matched files |")
+              lines.append("|---|---|---|---|")
+              for a in report["impacted_areas"]:
+                  kind_note = "enforced above (generated)" if a["kind"] == "generated" else "**please review manually**"
+                  lines.append(f"| {a['area']} | `{a['doc_path']}` | {kind_note} | {', '.join(a['matched_files'])} |")
+              lines.append("")
+              lines.append("This report is advisory for manual-kind areas; it does not fail the build on its own (an AI/heuristic opinion must not be a mandatory gate). Generated-kind areas are already enforced by the step above.")
+          text = "\n".join(lines)
+          print(text)
+          if summary_path:
+              with open(summary_path, "a") as f:
+                  f.write(text + "\n")
+          PYEOF
