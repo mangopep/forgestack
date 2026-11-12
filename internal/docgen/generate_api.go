@@ -113,7 +113,7 @@ func RenderAPIMarkdown(routes []APIRoute, sourceRelPath string) string {
 	b.WriteString("<!-- GENERATED FILE. Do not edit by hand. -->\n")
 	b.WriteString("<!-- Regenerate with: go run ./cmd/docgen generate api -->\n\n")
 	b.WriteString("# API Reference (generated)\n\n")
-	b.WriteString(fmt.Sprintf("Extracted directly from `%s` by parsing the Go source (`go/ast`) — not hand-written, not AI-generated. If this file is stale relative to the source, regenerate it; the CI docs check fails the build if it's out of sync.\n\n", sourceRelPath))
+	fmt.Fprintf(&b, "Extracted directly from `%s` by parsing the Go source (`go/ast`) — not hand-written, not AI-generated. If this file is stale relative to the source, regenerate it; the CI docs check fails the build if it's out of sync.\n\n", sourceRelPath)
 	b.WriteString("| Method | Path | Observed status codes | Source |\n")
 	b.WriteString("|---|---|---|---|\n")
 	for _, r := range routes {
@@ -125,7 +125,7 @@ func RenderAPIMarkdown(routes []APIRoute, sourceRelPath string) string {
 			}
 			codes = strings.Join(parts, ", ")
 		}
-		b.WriteString(fmt.Sprintf("| %s | `%s` | %s | %s:%d |\n", r.Method, r.Path, codes, sourceRelPath, r.SourceLine))
+		fmt.Fprintf(&b, "| %s | `%s` | %s | %s:%d |\n", r.Method, r.Path, codes, sourceRelPath, r.SourceLine)
 	}
 	b.WriteString("\n\"Observed status codes\" lists every status literal passed to `writeJSON` inside that handler's source, in ascending order — it is not a claim about which codes occur in production traffic, only which codes the code is capable of returning.\n")
 	return b.String()

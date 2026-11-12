@@ -106,7 +106,7 @@ func RenderCIMarkdown(summaries []WorkflowSummary) string {
 		if name == "" {
 			name = "(unnamed)"
 		}
-		b.WriteString(fmt.Sprintf("| `%s` | %s | %s |\n", s.File, name, triggers))
+		fmt.Fprintf(&b, "| `%s` | %s | %s |\n", s.File, name, triggers)
 	}
 	return b.String()
 }
