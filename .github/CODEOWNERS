@@ -1,2 +1,4 @@
-# Replace placeholder with YOUR GitHub username, then enable CODEOWNERS review in branch rules.
-# * @mangopep
+# Default owner for everything not matched by a more specific rule below.
+# Branch protection on main already requires "code owner" review (confirmed
+# separately); this is what makes that requirement resolve to someone.
+* @mangopep
