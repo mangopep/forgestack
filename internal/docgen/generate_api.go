@@ -19,10 +19,15 @@ type APIRoute struct {
 	SourceLine  int
 }
 
-// ExtractAPIRoutes parses goFile (expected to be internal/api/api.go-shaped:
-// a NewHandler function registering mux.HandleFunc("METHOD /path", handler))
-// and returns every route it finds, in source order. It only reports what it
-// can read directly from the AST — it never guesses behavior that isn't
+// ExtractAPIRoutes parses goFile looking for mux.HandleFunc("METHOD /path", fn)
+// or mux.Handle("METHOD /path", handler) registrations (the shape the
+// composition root in internal/platform/router uses) and returns every
+// route it finds, in source order. When the handler argument is a function
+// literal (inline handlers like /healthz), observed writeJSON status codes
+// are also extracted; when it's an arbitrary expression (e.g. a module's
+// transport.NewXHandler(...) call), only method/path are known — this tool
+// does not perform cross-package analysis. It only reports what it can read
+// directly from the AST — it never guesses behavior that isn't
 // expressed in code.
 func ExtractAPIRoutes(goFile string) ([]APIRoute, error) {
 	fset := token.NewFileSet()
@@ -38,7 +43,7 @@ func ExtractAPIRoutes(goFile string) ([]APIRoute, error) {
 			return true
 		}
 		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok || sel.Sel.Name != "HandleFunc" {
+		if !ok || (sel.Sel.Name != "HandleFunc" && sel.Sel.Name != "Handle") {
 			return true
 		}
 		if len(call.Args) < 2 {
@@ -73,9 +78,29 @@ func ExtractAPIRoutes(goFile string) ([]APIRoute, error) {
 	return routes, nil
 }
 
+// httpStatusConstants maps the net/http status constant names this
+// generator understands to their numeric value. It is intentionally a
+// fixed, explicit list (not a reflection trick) so the mapping is obvious
+// to read and update.
+var httpStatusConstants = map[string]int{
+	"StatusOK":                  200,
+	"StatusCreated":             201,
+	"StatusNoContent":           204,
+	"StatusBadRequest":          400,
+	"StatusUnauthorized":        401,
+	"StatusForbidden":           403,
+	"StatusNotFound":            404,
+	"StatusConflict":            409,
+	"StatusUnprocessableEntity": 422,
+	"StatusTooManyRequests":     429,
+	"StatusInternalServerError": 500,
+}
+
 // extractWriteJSONStatusCodes walks a handler's function literal looking for
-// calls shaped like writeJSON(w, <int literal>, ...) and collects the
-// distinct status codes actually written in that handler's source.
+// calls shaped like writeJSON(w, <status>, ...), where <status> is either
+// an integer literal or a recognized net/http status constant, and
+// collects the distinct status codes actually written in that handler's
+// source.
 func extractWriteJSONStatusCodes(fn *ast.FuncLit) []int {
 	seen := map[int]bool{}
 	ast.Inspect(fn, func(n ast.Node) bool {
@@ -87,15 +112,9 @@ func extractWriteJSONStatusCodes(fn *ast.FuncLit) []int {
 		if !ok || ident.Name != "writeJSON" || len(call.Args) < 2 {
 			return true
 		}
-		lit, ok := call.Args[1].(*ast.BasicLit)
-		if !ok || lit.Kind != token.INT {
-			return true
+		if code, ok := literalStatusCode(call.Args[1]); ok {
+			seen[code] = true
 		}
-		code, err := strconv.Atoi(lit.Value)
-		if err != nil {
-			return true
-		}
-		seen[code] = true
 		return true
 	})
 	var codes []int
@@ -104,6 +123,31 @@ func extractWriteJSONStatusCodes(fn *ast.FuncLit) []int {
 	}
 	sort.Ints(codes)
 	return codes
+}
+
+// literalStatusCode extracts a status code from either an integer literal
+// (e.g. 200) or a recognized http.StatusXxx selector expression.
+func literalStatusCode(arg ast.Expr) (int, bool) {
+	switch v := arg.(type) {
+	case *ast.BasicLit:
+		if v.Kind != token.INT {
+			return 0, false
+		}
+		code, err := strconv.Atoi(v.Value)
+		if err != nil {
+			return 0, false
+		}
+		return code, true
+	case *ast.SelectorExpr:
+		pkg, ok := v.X.(*ast.Ident)
+		if !ok || pkg.Name != "http" {
+			return 0, false
+		}
+		code, ok := httpStatusConstants[v.Sel.Name]
+		return code, ok
+	default:
+		return 0, false
+	}
 }
 
 // RenderAPIMarkdown renders routes as a Markdown table, with a header
