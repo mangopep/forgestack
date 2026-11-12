@@ -20,3 +20,9 @@ __pycache__/
 .claude/settings.local.json
 .claude/projects/
 .claude/todos/
+
+# Documentation website (Docusaurus) — package-lock.json IS tracked
+website/node_modules/
+website/build/
+website/.docusaurus/
+website/.cache-loader/

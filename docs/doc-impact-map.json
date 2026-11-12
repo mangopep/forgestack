@@ -83,6 +83,18 @@
       "area": "AI assistant working agreement",
       "doc_path": "CLAUDE.md",
       "kind": "manual"
+    },
+    {
+      "pattern": "website/**/*.js",
+      "area": "Documentation website configuration",
+      "doc_path": "docs/GITHUB-PAGES-SETUP.md",
+      "kind": "manual"
+    },
+    {
+      "pattern": ".github/workflows/pages-deploy.yml",
+      "area": "GitHub Pages publishing",
+      "doc_path": "docs/GITHUB-PAGES-SETUP.md",
+      "kind": "manual"
     }
   ]
 }

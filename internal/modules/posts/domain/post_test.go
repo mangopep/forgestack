@@ -42,6 +42,7 @@ func TestNewPostValidation(t *testing.T) {
 				t.Fatalf("expected no error, got %v", err)
 			}
 			if c.wantErr != nil && !errors.Is(err, c.wantErr) {
+			if c.wantErr != nil && err != c.wantErr {
 				t.Fatalf("expected %v, got %v", c.wantErr, err)
 			}
 		})

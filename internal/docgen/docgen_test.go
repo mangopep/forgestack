@@ -197,3 +197,26 @@ func TestCheckLinks(t *testing.T) {
 		t.Errorf("expected broken target does-not-exist.md, got %q", broken[0].Target)
 	}
 }
+
+func TestCheckLinksSkipsThirdPartyDirectories(t *testing.T) {
+	dir := t.TempDir()
+	// Simulate a dependency's README with links that are broken relative to
+	// OUR repo root but are perfectly fine within the dependency's own tree
+	// (this test doesn't need them to actually resolve — the point is they
+	// must never be reported at all, since they aren't our documentation).
+	nodeModules := filepath.Join(dir, "node_modules", "some-package")
+	if err := os.MkdirAll(nodeModules, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	thirdPartyReadme := "[changelog](./CHANGELOG.md)\n[example](examples/foo.js)\n"
+	if err := os.WriteFile(filepath.Join(nodeModules, "README.md"), []byte(thirdPartyReadme), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	broken, err := CheckLinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(broken) != 0 {
+		t.Fatalf("expected node_modules to be skipped entirely, got %+v", broken)
+	}
+}

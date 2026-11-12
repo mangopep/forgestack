@@ -6,6 +6,33 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
+    groups:
+      # codeql-action's init/analyze (and autobuild/upload-sarif if ever
+      # added) steps must all run the same major version within a
+      # workflow — CodeQL itself enforces this and fails the run
+      # otherwise ("Loaded a configuration file for version X, but
+      # running version Y"). Dependabot opened them as two independent
+      # PRs once (init->4.39.3, analyze->4.39.3, separately), each
+      # breaking CI alone since only one half of the pair moved. This
+      # groups them into a single PR going forward.
+      codeql-action:
+        patterns: ['github/codeql-action/*']
   - package-ecosystem: docker
     directory: /
     schedule: { interval: weekly }
+  - package-ecosystem: npm
+    directory: /website
+    schedule: { interval: weekly }
+    groups:
+      # react and react-dom's package.json versions must always move
+      # together (react-dom declares a peer dependency on react's exact
+      # major version) — Dependabot opened them as two independent PRs
+      # once (react-19.3.1 and react-dom-19.3.1, separately), each broken
+      # on its own since npm's peer resolution rejects a mismatch. This
+      # groups them into a single PR going forward.
+      react:
+        patterns: ['react', 'react-dom']
+      # @docusaurus/* packages are versioned in lockstep upstream; bumping
+      # one without the others is never a supported combination.
+      docusaurus:
+        patterns: ['@docusaurus/*']

@@ -19,18 +19,37 @@ type BrokenLink struct {
 
 var mdLinkRe = regexp.MustCompile(`\[[^\]]*\]\(([^)]+)\)`)
 
-// CheckLinks walks every .md file under root and verifies that relative
-// (non-http, non-mailto, non-anchor-only) links resolve to a real file.
-// It deliberately does not check http(s) links — that would require network
-// access this tool should not depend on — and does not check content
-// correctness, only that the referenced file exists.
+// skippedDirs are directories that may contain .md files but are never this
+// repository's own documentation — third-party packages, VCS metadata, or
+// build output. Without this, checking "." after `npm install` walks into
+// every dependency's README and reports its (irrelevant) broken links as
+// if they were this repo's own.
+var skippedDirs = map[string]bool{
+	".git":          true,
+	"node_modules":  true,
+	"build":         true,
+	".docusaurus":   true,
+	".cache-loader": true,
+}
+
+// CheckLinks walks every .md file under root (skipping skippedDirs) and
+// verifies that relative (non-http, non-mailto, non-anchor-only) links
+// resolve to a real file. It deliberately does not check http(s) links —
+// that would require network access this tool should not depend on — and
+// does not check content correctness, only that the referenced file exists.
 func CheckLinks(root string) ([]BrokenLink, error) {
 	var broken []BrokenLink
 	err := filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() || !strings.HasSuffix(p, ".md") {
+		if info.IsDir() {
+			if skippedDirs[info.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(p, ".md") {
 			return nil
 		}
 		// p came from filepath.Walk over root (a trusted local repo path
