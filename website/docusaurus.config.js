@@ -33,7 +33,23 @@ const config = {
       onBrokenMarkdownLinks: 'throw',
     },
   },
-  themes: ['@docusaurus/theme-mermaid'],
+  themes: [
+    '@docusaurus/theme-mermaid',
+    // Free, build-time-indexed local search — no Algolia account, no paid
+    // SaaS, no runtime network call. Index is generated at `npm run build`
+    // time and served as static JSON alongside the rest of the site.
+    [
+      '@easyops-cn/docusaurus-search-local',
+      /** @type {import('@easyops-cn/docusaurus-search-local').PluginOptions} */
+      ({
+        hashed: true,
+        language: ['en'],
+        indexDocs: true,
+        indexPages: false,
+        docsRouteBasePath: '/',
+      }),
+    ],
+  ],
 
   presets: [
     [
@@ -60,6 +76,18 @@ const config = {
   themeConfig: /** @type {import('@docusaurus/preset-classic').ThemeConfig} */ ({
     navbar: {
       title: 'ForgeStack',
+      logo: {
+        // static/img/forgestack-banner.svg is a tracked copy of
+        // docs/assets/forgestack-banner.svg (Docusaurus's navbar logo must
+        // resolve under static/). A symlink was tried first but rejected —
+        // Windows clones without core.symlinks enabled would get a broken
+        // logo (a text file containing the link target, not the image).
+        // Keep these two files identical by hand if the banner changes;
+        // see docs/handbook/DOCS-DEVELOPMENT.md and
+        // docs/adr/0003-documentation-as-code.md.
+        alt: 'ForgeStack',
+        src: 'img/forgestack-banner.svg',
+      },
       items: [
         {
           href: 'https://github.com/mangopep/forgestack',
