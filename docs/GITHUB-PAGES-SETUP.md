@@ -1,10 +1,17 @@
 # GitHub Pages setup (one-time, manual — cannot be done from a workflow file)
 
+**Status: done.** Confirmed live — `gh api repos/mangopep/forgestack/pages` reports
+`"build_type": "workflow"`, and `https://mangopep.github.io/forgestack/` returns HTTP 200
+serving the current `main` content. This happened automatically the first time a push to
+`main` touched `docs/`/`website/` after the steps below were completed; nothing further is
+needed here unless Pages gets disabled.
+
 `.github/workflows/pages-deploy.yml` builds and deploys the documentation site on every push to
 `main` that touches `docs/` or `website/`, using the official `actions/deploy-pages` action.
 That action can only publish successfully once Pages is turned on for this repository and set
 to the right source — a repository **Settings** change, not something any workflow YAML can
-configure for itself. Nobody has done this yet; the site will not go live until you do.
+configure for itself. The steps below are kept for reference (e.g. if Pages is ever disabled
+and needs re-enabling), not because they're still pending.
 
 ## Steps (one-time)
 
