@@ -1,9 +1,52 @@
-# ForgeStack — Go + Docker + AWS + DevSecOps
+<p align="center">
+  <img src="docs/assets/forgestack-banner.svg" alt="ForgeStack — build, test, observe, secure" width="760">
+</p>
 
-**A real, progressively expanded, cost-conscious engineering learning repository for an Apple M4 Mac.**
+<h1 align="center">ForgeStack</h1>
 
-Apache-2.0 licensed. See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and
-[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) before opening a PR or security report.
+<p align="center">
+  <strong>A hands-on cloud engineering lab — from your first Go API to secure infrastructure.</strong>
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache_2.0-blue" alt="License: Apache 2.0"></a>
+  <img src="https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go&amp;logoColor=white" alt="Go 1.23 or newer">
+  <img src="https://img.shields.io/badge/Docker-local_lab-2496ED?logo=docker&amp;logoColor=white" alt="Docker local lab">
+  <img src="https://img.shields.io/badge/AWS-opt--in-FF9900" alt="AWS: opt-in exercises">
+  <img src="https://img.shields.io/badge/Terraform-infrastructure-844FBA?logo=terraform&amp;logoColor=white" alt="Terraform infrastructure">
+  <img src="https://img.shields.io/badge/platform-Apple_silicon-555555?logo=apple&amp;logoColor=white" alt="Platform: Apple silicon">
+</p>
+
+<p align="center">
+  <a href="#first-5-minute-run-no-aws-account-no-cloud-bill">Quick start</a> ·
+  <a href="docs/ROADMAP.md">Learning roadmap</a> ·
+  <a href="docs/COMMANDS.md">Command reference</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a>
+</p>
+
+---
+
+ForgeStack is a progressively expanded, cost-conscious engineering learning repository for an
+Apple M4 Mac. Build a Go API, run local containers, practice automated code review, and explore
+AWS infrastructure through explicit, opt-in exercises.
+
+Start locally with **no AWS account and no cloud bill**. Follow the learning path as you add
+new tools, investigate failures, and document what you learn.
+
+## Table of contents
+
+- [What runs today](#what-runs-today-starter-milestone)
+- [Current limitations](#not-yet-implemented-future-lessons)
+- [Requirements](#mac-m4-requirements)
+- [Quick start](#first-5-minute-run-no-aws-account-no-cloud-bill)
+- [Docker lab](#docker-lab)
+- [Repository layout](#repository-layout)
+- [Code review and CI](#pr-safety-code-review-and-ci)
+- [Documentation site](#documentation-site)
+- [AWS and Terraform](#aws--terraform-no-automatic-charges)
+- [Learning philosophy](#learning-philosophy)
+- [Claude Code assistant](#claude-code-ai-engineering-assistant)
+- [Community and license](#community-and-license)
 
 ## What runs TODAY (starter milestone)
 
@@ -154,3 +197,11 @@ AI code review is **available locally on demand** through `/code-review`; it is 
 GitHub AI PR bot**. Existing GitHub PR automation uses golangci-lint, Reviewdog, Go checks,
 CodeQL, gitleaks and Trivy. A GitHub-integrated AI reviewer requires explicit installation,
 authorization, repository configuration and possibly usage charges.
+
+## Community and license
+
+Contributions are welcome. Read the [contribution guide](CONTRIBUTING.md) and
+[code of conduct](CODE_OF_CONDUCT.md) before opening a pull request. To report a security
+issue, follow the [security policy](SECURITY.md).
+
+ForgeStack is licensed under the [Apache License 2.0](LICENSE).
