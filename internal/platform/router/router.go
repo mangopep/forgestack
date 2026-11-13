@@ -13,6 +13,7 @@ import (
 	"github.com/mangopep/forgestack/internal/modules/posts/repository"
 	"github.com/mangopep/forgestack/internal/modules/posts/service"
 	posttransport "github.com/mangopep/forgestack/internal/modules/posts/transport"
+	"github.com/mangopep/forgestack/internal/platform/buildinfo"
 	"github.com/mangopep/forgestack/internal/platform/middleware"
 )
 
@@ -25,7 +26,11 @@ func New() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "service": "crushly-api"})
+		writeJSON(w, http.StatusOK, map[string]string{
+			"status":  "ok",
+			"service": buildinfo.Name,
+			"version": buildinfo.Version,
+		})
 	})
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ready", "storage": "in-memory"})
@@ -37,7 +42,7 @@ func New() http.Handler {
 	mux.Handle("GET /api/v1/posts", posttransport.NewListHandler(svc))
 	mux.Handle("POST /api/v1/posts", middleware.MaxBytes(4096)(posttransport.NewCreateHandler(svc)))
 
-	return middleware.RequestLogging(&requestCount)(mux)
+	return middleware.CorrelationID(middleware.RequestLogging(&requestCount)(mux))
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

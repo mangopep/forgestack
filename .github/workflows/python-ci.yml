@@ -1,0 +1,79 @@
+name: Python API Quality Gates
+on:
+  push:
+    branches: [main, staging, develop]
+    paths: ['apps/python-api/**', '.github/workflows/python-ci.yml']
+  pull_request:
+    paths: ['apps/python-api/**', '.github/workflows/python-ci.yml']
+permissions:
+  contents: read
+jobs:
+  python-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/python-api
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v6.0.0
+        with:
+          python-version: '3.12'
+      - name: Install dependencies (lockfile-pinned, reproducible)
+        run: pip install -r requirements-lock.txt
+      - name: Lint (ruff)
+        run: ruff check .
+      - name: Format check (ruff)
+        run: ruff format --check .
+      - name: Type check (mypy, strict)
+        run: mypy app
+      - name: Tests
+        run: python -m pytest -v
+  python-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/python-api
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v6.0.0
+        with:
+          python-version: '3.12'
+      - name: Dependency vulnerability scan (pip-audit)
+        run: |
+          pip install --quiet pip-audit==2.7.3
+          pip-audit --requirement requirements-lock.txt
+  python-container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build image locally (not pushed to any registry)
+        run: docker build -t forgestack-python-api:ci-scan apps/python-api
+      - name: Scan built image for known vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: forgestack-python-api:ci-scan
+          exit-code: '1'
+          severity: HIGH,CRITICAL
+      - name: Container smoke test (runs as non-root, healthz responds)
+        run: |
+          docker run -d --name python-api-smoke -p 18081:8081 forgestack-python-api:ci-scan
+          trap 'docker logs python-api-smoke || true; docker rm -f python-api-smoke || true' EXIT
+          for i in $(seq 1 20); do
+            if curl -sf http://127.0.0.1:18081/healthz > /tmp/healthz.json; then break; fi
+            sleep 1
+          done
+          cat /tmp/healthz.json
+          grep -q '"status":"ok"' /tmp/healthz.json || grep -q '"status": "ok"' /tmp/healthz.json
+          uid="$(docker inspect --format '{{.Config.User}}' python-api-smoke)"
+          echo "container user: $uid"
+          [ "$uid" != "root" ] && [ -n "$uid" ]

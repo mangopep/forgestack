@@ -27,23 +27,31 @@ const sidebars = {
       label: 'Architecture',
       items: [
         'architecture/PLATFORM-OVERVIEW',
+        'architecture/F3-APPLICATION-FOUNDATION',
         'architecture/posts-module',
         'adr/go-kit-for-posts-module',
         'adr/gitflow-branching-strategy',
         'adr/documentation-as-code',
+        'adr/f3-application-foundation',
       ],
     },
     {
       type: 'category',
       label: 'Applications',
-      items: ['generated/API', 'architecture/APPLICATION-ARCHITECTURE', 'PRODUCTION_READINESS'],
+      items: [
+        'generated/API',
+        'architecture/APPLICATION-ARCHITECTURE',
+        'PRODUCTION_READINESS',
+        { type: 'link', label: 'Python API README (apps/python-api/)', href: 'https://github.com/mangopep/forgestack/blob/main/apps/python-api/README.md' },
+      ],
     },
     {
       type: 'category',
       label: 'Platform',
       items: [
+        'platform/CONTRACTS',
         { type: 'doc', id: 'generated/COMMANDS', label: 'Command reference (generated)' },
-        { type: 'doc', id: 'generated/CONFIG', label: 'Environment variable reference (generated)' },
+        { type: 'doc', id: 'generated/CONFIG', label: 'Environment variable reference (generated, Go)' },
       ],
     },
     {

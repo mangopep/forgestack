@@ -220,3 +220,27 @@ func TestCheckLinksSkipsThirdPartyDirectories(t *testing.T) {
 		t.Fatalf("expected node_modules to be skipped entirely, got %+v", broken)
 	}
 }
+
+func TestCheckLinksSkipsPythonVirtualEnvironments(t *testing.T) {
+	dir := t.TempDir()
+	// Mirrors TestCheckLinksSkipsThirdPartyDirectories for Python's
+	// equivalent of node_modules -- a real regression found while adding
+	// apps/python-api: checklinks was walking into its .venv and reporting
+	// third-party packages' (e.g. mypyc's vendored googletest) broken
+	// links as if they were this repo's own documentation.
+	venvPkg := filepath.Join(dir, ".venv", "lib", "site-packages", "somepkg")
+	if err := os.MkdirAll(venvPkg, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	thirdPartyReadme := "[missing](./does-not-exist-in-our-repo.md)\n"
+	if err := os.WriteFile(filepath.Join(venvPkg, "README.md"), []byte(thirdPartyReadme), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	broken, err := CheckLinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(broken) != 0 {
+		t.Fatalf("expected .venv to be skipped entirely, got %+v", broken)
+	}
+}

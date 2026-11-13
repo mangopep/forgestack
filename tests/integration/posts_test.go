@@ -23,6 +23,38 @@ func TestHealth(t *testing.T) {
 	if r.Header().Get("Content-Type") != "application/json; charset=utf-8" {
 		t.Fatal("missing JSON content type")
 	}
+	var body struct {
+		Status, Service, Version string
+	}
+	if err := json.Unmarshal(r.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Service == "" || body.Version == "" {
+		t.Errorf("expected service metadata contract fields (docs/platform/CONTRACTS.md §2) to be non-empty, got %+v", body)
+	}
+}
+
+// TestCorrelationIDIsWiredIntoTheRealRouter proves the end-to-end behavior,
+// not just the middleware in isolation (see
+// internal/platform/middleware/middleware_test.go for that) — this is the
+// test that would actually catch a mistake in router.New()'s middleware
+// chain ordering.
+func TestCorrelationIDIsWiredIntoTheRealRouter(t *testing.T) {
+	handler := router.New()
+
+	r := httptest.NewRecorder()
+	handler.ServeHTTP(r, httptest.NewRequest("GET", "/healthz", nil))
+	if r.Header().Get("X-Request-Id") == "" {
+		t.Error("expected the real assembled router to echo a generated X-Request-Id")
+	}
+
+	req := httptest.NewRequest("GET", "/healthz", nil)
+	req.Header.Set("X-Request-Id", "integration-test-trace")
+	r = httptest.NewRecorder()
+	handler.ServeHTTP(r, req)
+	if got := r.Header().Get("X-Request-Id"); got != "integration-test-trace" {
+		t.Errorf("expected the real router to reuse an inbound X-Request-Id, got %q", got)
+	}
 }
 
 func TestReadyAndMetricsDemo(t *testing.T) {
