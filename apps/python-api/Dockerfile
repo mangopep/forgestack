@@ -17,9 +17,16 @@ WORKDIR /app
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 COPY app ./app
+# VERSION defaults to "docker-build" -- the honest default for an ordinary
+# (non-release) build. release.yml's publish job passes
+# --build-arg VERSION=<tag> so a published image's /healthz actually
+# reports the real release version -- this hardcoded value was the same
+# class of bug the Go Dockerfile had (see its own comment above); found
+# together while investigating v0.1.0's failed release attempt.
+ARG VERSION=docker-build
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    SERVICE_VERSION=docker-build \
+    SERVICE_VERSION=${VERSION} \
     PORT=8081
 USER appuser
 EXPOSE 8081
