@@ -1,11 +1,14 @@
 name: Trusted Release
 # Publishes a versioned, signed, SBOM'd release. Triggers ONLY on a pushed
-# `v*` tag -- never on pull_request, and tags should only ever be created
-# by pushing to `main` (not enforced by GitHub itself; documented
-# practice -- see docs/RELEASES.md). This mirrors supply-chain-attest.yml's
-# own trust boundary: privileged credentials (GHCR push, GitHub Release
-# creation, Sigstore signing) are only ever requested in this trusted,
-# tag-push context, never from PR-triggered code.
+# `v*` tag -- never on pull_request. `validate-tag`'s ancestry guard
+# (scripts/check-tag-ancestry.sh) enforces that the tagged commit is
+# actually reachable from `main` with a real `git merge-base
+# --is-ancestor` check, not documented practice alone -- see
+# docs/RELEASES.md. This mirrors supply-chain-attest.yml's own trust
+# boundary: privileged credentials (GHCR push, GitHub Release creation,
+# Sigstore signing) are only ever requested in this trusted, tag-push
+# context, never from PR-triggered code, and now only after the tag has
+# been proven to point at main's own history.
 #
 # NOT YET VERIFIED end-to-end (requires a real tag push, which this phase
 # does not do -- see docs/adr/0006-f5-templates-releases.md).
@@ -25,6 +28,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0 # full history required -- the ancestry guard below fails closed on a shallow clone, it does not trust one
+      - name: Fetch main (the ancestry guard needs a local ref for it)
+        run: git fetch origin main
+      - name: "Guard: the tagged commit must be reachable from main"
+        # Documented practice alone ("tags should only come from main")
+        # is not enforcement -- this is a real git-ancestry check, tested
+        # against real fixtures in scripts/test-check-tag-ancestry.sh
+        # (valid main commit / feature-only commit / missing commit or
+        # ref / shallow clone, all verified to behave correctly). Runs
+        # before SemVer validation, the duplicate-release check, and
+        # every downstream job -- nothing builds, signs, or publishes
+        # if this fails.
+        run: scripts/check-tag-ancestry.sh "${{ github.sha }}" origin/main
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.4'

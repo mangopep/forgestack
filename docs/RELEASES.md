@@ -13,7 +13,7 @@ was verified using **local fixtures** instead of a live run.
 
 ```mermaid
 flowchart LR
-    tag["git tag vX.Y.Z\n(pushed from main only)"] --> validate["validate-tag:\nSemVer check (cmd/semvercheck)\nrefuse duplicate release"]
+    tag["git tag vX.Y.Z"] --> validate["validate-tag:\nancestry guard (scripts/check-tag-ancestry.sh)\nSemVer check (cmd/semvercheck)\nrefuse duplicate release"]
     validate --> buildtest["build-test-scan:\nbuild + test + Trivy scan\n(same gate as every other build)"]
     buildtest --> publish["publish:\nbuild images -> push to GHCR\n-> SBOM (cmd/sbomcheck) -> sign (cosign)\n-> attest provenance -> GitHub Release"]
 
@@ -22,6 +22,16 @@ flowchart LR
     class validate,buildtest trusted
     class publish gap
 ```
+
+**The tagged commit must be reachable from `main`** — enforced by a real `git merge-base
+--is-ancestor` check (`scripts/check-tag-ancestry.sh`), not documented practice alone. It
+fails closed: a shallow clone, a missing ref, or a commit this repository doesn't know
+about are all treated as failure, never as "assume it's fine." Tested against real git
+fixtures (a valid `main` commit, a feature-only commit never merged, a missing commit, a
+missing ref, and a shallow clone) in `scripts/test-check-tag-ancestry.sh` — run it by hand
+whenever the guard itself changes. This is the very first step of `validate-tag`, which
+every other job (`build-test-scan`, `publish`) depends on via `needs:` — nothing builds,
+signs, or publishes before it passes.
 
 The `publish` job is the one carrying privileged credentials (`contents: write`,
 `packages: write`, `id-token: write`, `attestations: write`) and is drawn as the
