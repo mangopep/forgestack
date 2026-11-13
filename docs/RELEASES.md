@@ -4,11 +4,12 @@ title: Trusted releases
 
 # Trusted releases
 
-**Status: exercised once for real (`v0.1.0`, see the incident below), partially succeeded,
-fixes applied, not yet re-attempted.** `validate-tag` and `build-test-scan` have both now
-run live and passed; `publish` has run live once and failed partway through. See
-"`v0.1.0` failed-attempt history" below for exactly what happened, what state the
-repository is in right now, and what changed as a result before any next attempt.
+**Status: exercised twice for real (`v0.1.0` and `v0.1.1`), both partially succeeded, a
+second round of fixes applied, not yet re-attempted.** `validate-tag` and `build-test-scan`
+have both now run live and passed on both attempts; `publish` has run live twice and failed
+partway through each time, at a **different** step each time. See "`v0.1.0` failed-attempt
+history" and "`v0.1.1` failed-attempt history" below for exactly what happened, what state
+the repository is in right now, and what changed as a result before any next attempt.
 
 ## Pipeline overview
 
@@ -145,12 +146,104 @@ image is **never** silently deleted as a reflex:
    explicit decision is made to delete it — that decision belongs to whoever owns the
    registry, not to this automation.
 
-## `v0.1.1` — prepared, not tagged
+## `v0.1.1` failed-attempt history
 
-The fixes above are ready to be exercised by a `v0.1.1` tag once separately approved. No
-tag has been created. When it is: `go run ./cmd/semvercheck compat v0.1.0 v0.1.1` classifies
-it as `patch` (bug fixes only, no new capability) — consistent with this being a repair of
-`v0.1.0`'s own release pipeline, not a new feature.
+**2026-11-13, second live run of `release.yml`.** Tag `v0.1.1` pushed against the verified
+`main` commit `90da9d887cafb8324c3b2d9826dba52ed57c1ec3` (`go run ./cmd/semvercheck compat
+v0.1.0 v0.1.1` classifies it as `patch`, consistent with this being a repair of `v0.1.0`'s
+own release pipeline, not a new feature).
+
+### What happened, confirmed from the actual job logs
+
+- `validate-tag`: **passed.**
+- `build-test-scan`: **passed** — including `scripts/verify-release-image-version.sh`,
+  which confirmed the version-embedding fix works for real this time.
+- `publish`: **failed partway through, at a different, later step than `v0.1.0`.**
+  - Preflight push-access probe: **passed** — the original `v0.1.0` GHCR "denied" problem
+    did **not** recur.
+  - Both images built, version-verified, SBOM'd, and **pushed successfully** — unlike
+    `v0.1.0`, where the Python image's push failed. `ghcr.io/mangopep/forgestack:v0.1.1`
+    digest `sha256:b27b2bc3335740bfd1329c6e227015d41b2d4006959966d0f9758fe40e7f5b27`;
+    `ghcr.io/mangopep/forgestack-python-api:v0.1.1` digest
+    `sha256:421e1663089d124185fbfcd2e3bbd34886dbb86cc3b896d185b155bcf7a3f7f2`.
+  - Both images **signed successfully** (`cosign sign`, confirmed independently afterward
+    with a fresh `cosign verify` against both digests — valid, keyless, bound to this
+    workflow run).
+  - **"Attest build provenance for the Go image digest" failed**: `Error: subject-digest
+    must be in the format "sha256:<hex-digest>"`. The Python attestation step was
+    correctly **skipped** (sequential), and "Create the GitHub Release" was correctly
+    **skipped** (atomic-last design worked exactly as intended).
+
+### Diagnosis — confirmed, not a hypothesis this time
+
+The digest-resolution step computed `go_digest`/`py_digest` via `docker inspect --format=
+'{{index .RepoDigests 0}}'`, which returns the **full** reference
+(`ghcr.io/mangopep/forgestack@sha256:<hex>`), and passed that whole string straight into
+`actions/attest-build-provenance`'s `subject-digest` input — which accepts only the bare
+`sha256:<hex>` portion. This bug was introduced during the `v0.1.0` repair and was never
+exercised live before `v0.1.1`, because it requires an actual pushed image digest: F4's
+`supply-chain-attest.yml` attests local SBOM *files* via `subject-path` (hashing file
+content), a completely different code path that never touches this string.
+
+This was independently confirmed after the run, not just taken from the job's own report:
+both images were freshly re-pulled by digest (`docker pull --platform linux/amd64`), both
+ran and correctly reported `version: v0.1.1` on `/healthz`, both signatures independently
+re-verified with `cosign verify`, no GitHub Release exists (`gh release view v0.1.1`: not
+found), and no GitHub-native attestation exists for either image (`gh attestation verify`:
+`404` for both — Go's failed, Python's was skipped).
+
+### What changed as a result (this branch)
+
+1. **Two small, independently-tested scripts replace the inline digest extraction**:
+   `scripts/select-single-repo-digest.sh` fails closed if a `RepoDigests` array is missing
+   (empty) or ambiguous (more than one entry) instead of blindly indexing `[0]`;
+   `scripts/validate-image-digest.sh` strictly validates the `name@sha256:<64-hex>` shape
+   and extracts just the bare digest, failing closed on anything malformed (wrong length,
+   uppercase, wrong algorithm, embedded whitespace, more than one `@`, trailing garbage).
+   Regression tests (`scripts/test-select-single-repo-digest.sh`,
+   `scripts/test-validate-image-digest.sh`) use the **real** digests from this `v0.1.1`
+   attempt as their positive cases.
+2. **The full reference is kept alongside the bare digest** (`go_digest_full`/
+   `py_digest_full` outputs) — `cosign sign` and the release notes still use the full,
+   human-readable reference; only the two `attest-build-provenance` steps use the bare
+   digest, which is what actually needed fixing.
+3. **A new post-attestation verification step**, `scripts/verify-release-attestation.sh`
+   (a thin wrapper around `gh attestation verify`) plus `scripts/check-attestation-match.py`
+   (the actual matching logic, kept separate so it's testable offline), re-reads each
+   attestation back independently and asserts its subject digest, source commit, and
+   workflow ref all match what this run actually published — rather than trusting the
+   action did the right thing without checking. The matcher searches **every** subject in
+   the returned statement for the expected digest instead of indexing `subject[0]` — a real
+   GitHub attestation can cover multiple subjects in one statement (confirmed by pulling a
+   live attestation from `supply-chain-attest.yml`'s successful run on `main`, which covers
+   three SBOM files in a single statement), so trusting index `0` would silently check the
+   wrong subject's digest whenever the one being verified isn't listed first.
+   `scripts/test-check-attestation-match.sh` exercises this against that real, live-fetched
+   attestation fixture (`scripts/testdata/real-attestation-fixture.json`) plus deliberately
+   mismatched/malformed variants, entirely offline — it never calls `gh attestation verify`
+   itself. The wrapper script's live call is **not yet runtime-verified end-to-end**: doing
+   so requires a real tag push whose attestation step actually succeeds, which this phase of
+   work (local-only, no publishing) is not authorized to perform.
+4. Tag ancestry checks, version embedding, signing, Trivy/SBOM scanning, job permissions,
+   and the `publish` job's partial-failure reporting are all **unchanged** by this fix.
+
+### Current state of `v0.1.1` — nothing further touched
+
+| Artifact | State |
+|---|---|
+| Tag `v0.1.1` | exists, points at the correct commit — **not moved or deleted** |
+| `ghcr.io/mangopep/forgestack:v0.1.1` | published, signed, correctly reports `version: "v0.1.1"`, **unattested** — **not deleted or replaced** |
+| `ghcr.io/mangopep/forgestack-python-api:v0.1.1` | published, signed, correctly reports `version: "v0.1.1"`, **unattested** (attestation step was skipped) — **not deleted or replaced** |
+| GitHub Release `v0.1.1` | does not exist |
+
+### Recovery procedure for this exact situation
+
+Per the same policy as `v0.1.0`: `v0.1.1`'s two signed-but-unattested, unreleased images are
+**never** reused, moved, deleted, or force-overwritten as a reflex. The next release attempt
+(once this fix is separately approved and actually exercised live) uses the same `v0.1.1`
+tag only if no release exists for it yet (`validate-tag`'s duplicate-release check already
+enforces this) — or a new patch tag, if a human decides the images already published for
+`v0.1.1` should be left in place and superseded instead.
 
 ## Preventing accidental duplicate versions, tag overwrites, and partial releases
 
@@ -182,9 +275,9 @@ Every release artifact's metadata links all the way back to source, recorded exp
 |---|---|
 | Release version → source commit | The GitHub Release's own `tag_name` (the tag IS a commit pointer) and the release notes include `github.sha` explicitly |
 | Source commit → build | `release.yml`'s `build-test-scan` job builds directly from the checked-out tag's commit; the Go binary is built with `-ldflags -X .../buildinfo.Version=<tag>` |
-| Build → artifact digest | `docker inspect --format '{{index .RepoDigests 0}}'` immediately after push — the digest, not the mutable tag, is what gets signed and attested |
+| Build → artifact digest | `docker inspect --format '{{json .RepoDigests}}'` immediately after push, resolved through `scripts/select-single-repo-digest.sh` (fails closed if missing or ambiguous) — the digest, not the mutable tag, is what gets signed and attested |
 | Artifact digest → SBOM | `cmd/sbomcheck augment` records the exact `forgestack:commit` property in the SBOM's metadata, generated from the same pushed image |
-| Artifact digest → attestation | `actions/attest-build-provenance`'s `subject-digest` input is the resolved digest, not the tag — matching F4's already-verified pattern (see `docs/adr/0005-f4-security-supply-chain.md`'s live verification of `supply-chain-attest.yml`) |
+| Artifact digest → attestation | `actions/attest-build-provenance`'s `subject-digest` input is the **bare** `sha256:<hex>` digest (never the full `name@sha256:<hex>` reference — `v0.1.1`'s real failure, see above, and now extracted and validated by `scripts/validate-image-digest.sh` rather than inline string slicing), matching F4's already-verified pattern (see `docs/adr/0005-f4-security-supply-chain.md`'s live verification of `supply-chain-attest.yml`) |
 
 ## Local fixture verification (what was actually run this phase)
 
