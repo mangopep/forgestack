@@ -7,10 +7,10 @@ Extracted directly from `internal/platform/router/router.go` by parsing the Go s
 
 | Method | Path | Observed status codes | Source |
 |---|---|---|---|
-| GET | `/healthz` | 200 | internal/platform/router/router.go:27 |
-| GET | `/readyz` | 200 | internal/platform/router/router.go:30 |
-| GET | `/metrics-demo` | 200 | internal/platform/router/router.go:33 |
-| GET | `/api/v1/posts` | unknown | internal/platform/router/router.go:37 |
-| POST | `/api/v1/posts` | unknown | internal/platform/router/router.go:38 |
+| GET | `/healthz` | 200 | internal/platform/router/router.go:28 |
+| GET | `/readyz` | 200 | internal/platform/router/router.go:35 |
+| GET | `/metrics-demo` | 200 | internal/platform/router/router.go:38 |
+| GET | `/api/v1/posts` | unknown | internal/platform/router/router.go:42 |
+| POST | `/api/v1/posts` | unknown | internal/platform/router/router.go:43 |
 
 "Observed status codes" lists every status literal passed to `writeJSON` inside that handler's source, in ascending order — it is not a claim about which codes occur in production traffic, only which codes the code is capable of returning.

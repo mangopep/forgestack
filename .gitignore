@@ -15,6 +15,11 @@ bin/
 crash.log
 __pycache__/
 *.pyc
+.venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # Claude personal configuration and session artifacts
 .claude/settings.local.json
