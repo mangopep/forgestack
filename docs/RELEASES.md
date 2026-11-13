@@ -207,13 +207,23 @@ found), and no GitHub-native attestation exists for either image (`gh attestatio
    `py_digest_full` outputs) — `cosign sign` and the release notes still use the full,
    human-readable reference; only the two `attest-build-provenance` steps use the bare
    digest, which is what actually needed fixing.
-3. **A new post-attestation verification step**, `scripts/verify-release-attestation.sh`,
-   re-reads each attestation back independently via `gh attestation verify` and asserts its
-   subject digest, source commit, and workflow ref all match what this run actually
-   published — rather than trusting the action did the right thing without checking.
-   **Not yet runtime-verified end-to-end**: doing so requires a real tag push whose
-   attestation step actually succeeds, which this phase of work (local-only, no publishing)
-   is not authorized to perform.
+3. **A new post-attestation verification step**, `scripts/verify-release-attestation.sh`
+   (a thin wrapper around `gh attestation verify`) plus `scripts/check-attestation-match.py`
+   (the actual matching logic, kept separate so it's testable offline), re-reads each
+   attestation back independently and asserts its subject digest, source commit, and
+   workflow ref all match what this run actually published — rather than trusting the
+   action did the right thing without checking. The matcher searches **every** subject in
+   the returned statement for the expected digest instead of indexing `subject[0]` — a real
+   GitHub attestation can cover multiple subjects in one statement (confirmed by pulling a
+   live attestation from `supply-chain-attest.yml`'s successful run on `main`, which covers
+   three SBOM files in a single statement), so trusting index `0` would silently check the
+   wrong subject's digest whenever the one being verified isn't listed first.
+   `scripts/test-check-attestation-match.sh` exercises this against that real, live-fetched
+   attestation fixture (`scripts/testdata/real-attestation-fixture.json`) plus deliberately
+   mismatched/malformed variants, entirely offline — it never calls `gh attestation verify`
+   itself. The wrapper script's live call is **not yet runtime-verified end-to-end**: doing
+   so requires a real tag push whose attestation step actually succeeds, which this phase of
+   work (local-only, no publishing) is not authorized to perform.
 4. Tag ancestry checks, version embedding, signing, Trivy/SBOM scanning, job permissions,
    and the `publish` job's partial-failure reporting are all **unchanged** by this fix.
 

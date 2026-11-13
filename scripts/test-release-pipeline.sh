@@ -83,6 +83,13 @@ else
   echo "FAIL: select-single-repo-digest test suite"
   fail_count=$((fail_count + 1))
 fi
+if "$script_dir/test-check-attestation-match.sh"; then
+  echo "PASS: check-attestation-match test suite"
+  pass_count=$((pass_count + 1))
+else
+  echo "FAIL: check-attestation-match test suite"
+  fail_count=$((fail_count + 1))
+fi
 
 echo "--- Cleanup ---"
 docker rm -f \
