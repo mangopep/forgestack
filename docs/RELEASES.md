@@ -4,12 +4,18 @@ title: Trusted releases
 
 # Trusted releases
 
-**Status: exercised twice for real (`v0.1.0` and `v0.1.1`), both partially succeeded, a
-second round of fixes applied, not yet re-attempted.** `validate-tag` and `build-test-scan`
-have both now run live and passed on both attempts; `publish` has run live twice and failed
-partway through each time, at a **different** step each time. See "`v0.1.0` failed-attempt
-history" and "`v0.1.1` failed-attempt history" below for exactly what happened, what state
-the repository is in right now, and what changed as a result before any next attempt.
+**Status: `v0.1.2` is a verified, fully successful release — the first in this repo's
+history.** `v0.1.0` and `v0.1.1` both failed partway through `publish`, at a different step
+each time; both failures were fixed, and `v0.1.2` proved the fixes live, end to end,
+including independent re-verification after the run (not just trusting the job's own
+report). See "`v0.1.0` failed-attempt history", "`v0.1.1` failed-attempt history", and
+"`v0.1.2` — verified successful release" below for the full account of each attempt, in
+order, with nothing altered or removed from the earlier two.
+
+**This does not mean the pipeline is proven for every future case** — see "`v0.1.2`" below
+for the specific limitations that remain (a single successful run, not a long-running
+track record; the live attestation-verification call path exercised for the first time;
+the still-open, separately tracked vulnerability exceptions #35/#40).
 
 ## Pipeline overview
 
@@ -18,12 +24,10 @@ flowchart LR
     tag["git tag vX.Y.Z"] --> validate["validate-tag:\nancestry guard (scripts/check-tag-ancestry.sh)\nSemVer check (cmd/semvercheck)\nrefuse duplicate release"]
     validate --> buildtest["build-test-scan:\nbuild (version-embedded) + test\nverify image version + Trivy scan"]
     buildtest --> preflight["publish: registry push-access preflight\n(scripts/preflight-registry-push-access.sh,\nboth image paths, before building anything)"]
-    preflight --> publish["publish: build images -> verify version\n-> push to GHCR -> SBOM -> sign -> attest\n-> GitHub Release"]
+    preflight --> publish["publish: build images -> verify version\n-> push to GHCR -> SBOM -> sign -> attest\n-> verify attestations -> GitHub Release"]
 
     classDef trusted fill:#2f855a,color:#fff,stroke:#22543d
-    classDef gap fill:#c53030,color:#fff,stroke:#822727,stroke-dasharray: 4 3
-    class validate,buildtest trusted
-    class preflight,publish gap
+    class validate,buildtest,preflight,publish trusted
 ```
 
 **The tagged commit must be reachable from `main`** — enforced by a real `git merge-base
@@ -37,9 +41,10 @@ every other job (`build-test-scan`, `publish`) depends on via `needs:` — nothi
 signs, or publishes before it passes.
 
 The `publish` job is the one carrying privileged credentials (`contents: write`,
-`packages: write`, `id-token: write`, `attestations: write`) and is drawn as the
-not-yet-verified step. `validate-tag` and `build-test-scan` are identical in trust level to
-every other CI job in this repository.
+`packages: write`, `id-token: write`, `attestations: write`). It has now run live three
+times (`v0.1.0`, `v0.1.1`, `v0.1.2`) and succeeded in full on the third — see "`v0.1.2` —
+verified successful release" below for the live verification evidence. `validate-tag` and
+`build-test-scan` are identical in trust level to every other CI job in this repository.
 
 ## `v0.1.0` failed-attempt history
 
@@ -245,6 +250,114 @@ tag only if no release exists for it yet (`validate-tag`'s duplicate-release che
 enforces this) — or a new patch tag, if a human decides the images already published for
 `v0.1.1` should be left in place and superseded instead.
 
+## `v0.1.2` — verified successful release
+
+**2026-11-13, third live run of `release.yml`. First fully successful release.** Tag
+`v0.1.2` pushed against the verified `main` commit
+`59bd00eeb2041254444573fec781c0c00df35d37` (the commit that promoted the `v0.1.1`
+attestation repair all the way to `main`).
+
+**Release:** [github.com/mangopep/forgestack/releases/tag/v0.1.2](https://github.com/mangopep/forgestack/releases/tag/v0.1.2)
+**Workflow run:** [43464656932](https://github.com/mangopep/forgestack/actions/runs/43464656932)
+
+### What happened, confirmed from the actual job logs
+
+- `validate-tag`: **passed.**
+- `build-test-scan`: **passed**, including both Trivy scans (see "Vulnerability exceptions"
+  below).
+- `publish`: **passed in full — every one of its 20 steps succeeded**, in order: registry
+  preflight, image builds, version verification, SBOM generation/augmentation/validation,
+  GHCR login, **both image pushes**, digest resolution, cosign install, **both image
+  signatures**, **both build-provenance attestations**, the new post-attestation
+  verification step, and GitHub Release creation. The `if: failure()`
+  "PARTIAL RELEASE" step correctly **skipped** — nothing failed, so there was nothing
+  partial to report.
+
+### Published artifacts
+
+| Artifact | Value |
+|---|---|
+| Go image (immutable digest) | `ghcr.io/mangopep/forgestack@sha256:59f5d252dc3bce9fe21273cbe325dae1b054d6c852feb8c25268973941f0682b` |
+| Python image (immutable digest) | `ghcr.io/mangopep/forgestack-python-api@sha256:6c234d626c194e86b83f54048cdded1e3c7327bf4f7ac66bc798589f116540d7` |
+| Source commit | `59bd00eeb2041254444573fec781c0c00df35d37` (`main`) |
+| GitHub Release | [github.com/mangopep/forgestack/releases/tag/v0.1.2](https://github.com/mangopep/forgestack/releases/tag/v0.1.2), assets `sbom-go.cdx.json`, `sbom-python.cdx.json` |
+
+### Independent verification performed after the run
+
+Every claim below was re-checked directly against GHCR/GitHub/Sigstore after the workflow
+finished — not read off the job's own summary:
+
+- **Runtime version**: both images freshly re-pulled by digest (`docker pull --platform
+  linux/amd64`), run, and queried on `/healthz` — Go reports `{"status":"ok",
+  "version":"v0.1.2", ...}`, Python reports `{"status":"ok","version":"v0.1.2", ...}`.
+- **Cosign signature**: `cosign verify` against both image digests succeeded (keyless,
+  Fulcio-issued certificate), with the certificate's embedded claims showing
+  `githubWorkflowSha: 59bd00eeb2041254444573fec781c0c00df35d37`,
+  `githubWorkflowRef: refs/tags/v0.1.2`, `githubWorkflowName: Trusted Release` for both
+  images.
+- **GitHub-native provenance attestation — the exact check that failed on `v0.1.1`**:
+  `gh attestation verify oci://<image>@<digest> --repo mangopep/forgestack` succeeded for
+  **both** images, with `sourceRepositoryDigest: 59bd00eeb2041254444573fec781c0c00df35d37`
+  and `sourceRepositoryRef: refs/tags/v0.1.2` exactly as expected. This is the first live
+  proof that `scripts/validate-image-digest.sh`'s bare-digest extraction and
+  `scripts/verify-release-attestation.sh`'s live `gh attestation verify` call path both
+  work correctly end to end, not just against the offline test fixtures from the `v0.1.1`
+  repair.
+- **Release SBOMs**: both assets (`sbom-go.cdx.json`, `sbom-python.cdx.json`) downloaded
+  fresh from the Release and passed `go run ./cmd/sbomcheck validate`; their
+  `metadata.properties` carry `forgestack:repository: mangopep/forgestack` and
+  `forgestack:commit: 59bd00eeb2041254444573fec781c0c00df35d37` for both, binding each SBOM
+  back to the exact source commit.
+- **No secrets in release evidence**: the downloaded SBOMs were scanned for common secret
+  shapes (AWS access keys, private-key PEM headers, GitHub/Slack tokens, inline
+  `password=`/`password:` literals) with no matches. `gitleaks` itself was not available in
+  this verification environment, so this was a manual pattern check, not a `gitleaks` run —
+  noted here rather than overstated.
+
+### Vulnerability exceptions (unchanged by this release)
+
+Both Trivy scans in `build-test-scan` passed under their existing, separately tracked
+policy — this release did not weaken either gate:
+
+- **Go image**: scanned under the full `HIGH,CRITICAL` exit-code gate, no exception. Issue
+  **#35** (26 pre-existing npm audit findings in `website/`'s Docusaurus dev tooling) is
+  unrelated to the released images and remains open and tracked.
+- **Python image**: scanned with the pre-existing `ignore-unfixed: true` exception — the
+  same documented exception as `python-ci.yml`, covering OS-level CVEs in the base image
+  with no available fix yet. Issue **#40** (revisit this exception) remains open and
+  tracked; this release does not close or reduce its scope.
+
+### What this run does — and does not — prove
+
+**Proven, live, for the first time:**
+- The full `release.yml` pipeline can run tag-push to GitHub-Release-published without
+  manual intervention.
+- The `v0.1.1` attestation-digest fix (bare `sha256:<hex>` extraction, fail-closed
+  validation, post-attestation re-verification by digest across all subjects) works
+  correctly against a real registry push and a real GitHub attestation — not just against
+  the offline fixtures used to build it.
+- Both language runtimes correctly embed and report their release version from the Docker
+  build-arg path, not just from a native build.
+
+**Not proven by a single successful run:**
+- Long-running reliability — one success does not rule out intermittent registry/API
+  failures (`v0.1.0`'s GHCR "denied" and `v0.1.1`'s attestation-format error were both
+  real, live failures discovered only by actually running the pipeline, not by local
+  testing alone).
+- The `preflight-registry-push-access.sh` script's success path specifically — it passed
+  here, but its only previously *confirmed* behavior (before this run) was its failure path
+  against an invalid token; this run is its first live confirmation that a PASS from it
+  correlates with an actual successful push.
+- Anything about `v0.1.3`-or-later releases, larger images, additional services, or
+  concurrent release runs — this is one data point, not a guarantee.
+
+### Current state — `v0.1.0` and `v0.1.1` unaffected
+
+Reconfirmed after this run, with no changes: `v0.1.0`'s tag and Go image, and `v0.1.1`'s
+tag and both signed-but-unattested images, are exactly as described in their own sections
+above — nothing about `v0.1.2`'s success retroactively changes, repairs, or obsoletes
+either prior record.
+
 ## Preventing accidental duplicate versions, tag overwrites, and partial releases
 
 - **Duplicate tag/version**: `validate-tag` calls `gh release view <tag>` before anything
@@ -306,19 +419,25 @@ cosign sign-blob --key cosign.key --bundle sbom-fixture.augmented.cdx.json.bundl
 cosign verify-blob --key cosign.pub --bundle sbom-fixture.augmented.cdx.json.bundle --insecure-ignore-tlog sbom-fixture.augmented.cdx.json
 ```
 
-## Verifying a real release (once one exists)
+## Verifying a real release
+
+`v0.1.2` is a real, published example — these commands were actually run against it (see
+"`v0.1.2` — verified successful release" above for the full results), and work unchanged
+for any later tag by substituting the version:
 
 ```bash
-# Signature (keyless, repository-scoped identity)
-cosign verify "ghcr.io/mangopep/forgestack:vX.Y.Z" \
+# Signature (keyless, repository-scoped identity) -- works against the tag or a digest
+cosign verify "ghcr.io/mangopep/forgestack:v0.1.2" \
   --certificate-identity-regexp '^https://github.com/mangopep/forgestack/' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
 
-# Provenance (GitHub-native attestation)
-gh attestation verify oci://ghcr.io/mangopep/forgestack:vX.Y.Z --owner mangopep
+# Provenance (GitHub-native attestation) -- use the immutable digest, not the tag
+gh attestation verify \
+  oci://ghcr.io/mangopep/forgestack@sha256:59f5d252dc3bce9fe21273cbe325dae1b054d6c852feb8c25268973941f0682b \
+  --repo mangopep/forgestack
 
 # SBOM (attached to the GitHub Release)
-gh release download vX.Y.Z --repo mangopep/forgestack --pattern 'sbom-*.cdx.json'
+gh release download v0.1.2 --repo mangopep/forgestack --pattern 'sbom-*.cdx.json'
 go run ./cmd/sbomcheck validate sbom-go.cdx.json
 ```
 
