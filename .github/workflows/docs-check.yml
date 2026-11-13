@@ -86,6 +86,11 @@ jobs:
       - name: Install dependencies (lockfile-pinned, reproducible)
         working-directory: website
         run: npm ci
+      - name: Dependency vulnerability scan (against a reviewed, dated baseline — see issue #35)
+        working-directory: website
+        run: |
+          npm audit --json > /tmp/npm-audit.json || true
+          python3 ../scripts/check-npm-audit-baseline.py /tmp/npm-audit.json .security/npm-audit-baseline.json
       - name: Build the documentation site (build-only — no deploy on PRs)
         working-directory: website
         run: npm run build

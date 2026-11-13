@@ -149,6 +149,36 @@
       "area": "Contributor handbook",
       "doc_path": "docs/handbook/",
       "kind": "manual"
+    },
+    {
+      "pattern": "internal/secreport/**/*.go",
+      "area": "Security report generator",
+      "doc_path": "docs/security/VULNERABILITY-LIFECYCLE.md",
+      "kind": "manual"
+    },
+    {
+      "pattern": "cmd/secreport/**/*.go",
+      "area": "Security report generator",
+      "doc_path": "docs/security/VULNERABILITY-LIFECYCLE.md",
+      "kind": "manual"
+    },
+    {
+      "pattern": "internal/sbomcheck/**/*.go",
+      "area": "SBOM validation and augmentation",
+      "doc_path": "docs/architecture/SUPPLY-CHAIN-SECURITY.md",
+      "kind": "manual"
+    },
+    {
+      "pattern": "cmd/sbomcheck/**/*.go",
+      "area": "SBOM validation and augmentation",
+      "doc_path": "docs/architecture/SUPPLY-CHAIN-SECURITY.md",
+      "kind": "manual"
+    },
+    {
+      "pattern": "docs/security/**",
+      "area": "Security and supply-chain documentation",
+      "doc_path": "docs/security/",
+      "kind": "manual"
     }
   ]
 }

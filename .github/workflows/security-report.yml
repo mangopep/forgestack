@@ -1,0 +1,143 @@
+name: Security Report
+# Runs the real scanners (not a second copy of their logic — see
+# cmd/secreport's own doc comment) and assembles cmd/secreport's stable
+# JSON + Markdown report from their actual output. Advisory: this workflow
+# documents security posture, it does not gate merges on its own (the
+# individual scanner jobs in ci.yml/python-ci.yml/container-scan.yml/
+# secret-scan.yml already do that).
+on:
+  push:
+    branches: [main, staging, develop]
+  workflow_dispatch: {}
+  schedule:
+    # Weekly deep recheck of already-released components against newly
+    # disclosed vulnerabilities (F4 requirement: "a documented process for
+    # rechecking previously released components") -- scanner databases
+    # (govulncheck, Trivy, pip-audit) update continuously, independent of
+    # any code change here, so a schedule is the only way to catch a CVE
+    # disclosed against code that hasn't changed.
+    - cron: '30 7 * * 1'
+permissions:
+  contents: read
+jobs:
+  generate-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # gitleaks below scans full history, matching secret-scan.yml
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.4'
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v6.0.0
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: website/package-lock.json
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck
+        run: "\"$(go env GOPATH)/bin/govulncheck\" -json ./... > govulncheck.json || true"
+
+      - name: Run pip-audit
+        working-directory: apps/python-api
+        run: |
+          pip install --quiet -r requirements-lock.txt
+          pip install --quiet pip-audit==2.7.3
+          pip-audit --requirement requirements-lock.txt --format=json > ../../pip-audit.json || true
+
+      - name: Build images and run Trivy (unfiltered — full evidence preserved)
+        run: |
+          docker build -t forgestack:report-scan .
+          docker build -t forgestack-python-api:report-scan apps/python-api
+      - name: Scan Go image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: forgestack:report-scan
+          format: json
+          output: trivy-go-image.json
+          exit-code: '0'
+          severity: HIGH,CRITICAL
+      - name: Scan Python image (unfiltered, no ignore-unfixed — the CI gate's exception does not apply to this report)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: forgestack-python-api:report-scan
+          format: json
+          output: trivy-python-image.json
+          exit-code: '0'
+          severity: HIGH,CRITICAL
+      - name: Scan Go Dockerfile
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: Dockerfile
+          format: json
+          output: trivy-go-dockerfile.json
+          exit-code: '0'
+          severity: HIGH,CRITICAL
+      - name: Scan Python Dockerfile
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: apps/python-api/Dockerfile
+          format: json
+          output: trivy-python-dockerfile.json
+          exit-code: '0'
+          severity: HIGH,CRITICAL
+
+      - name: Run gitleaks
+        # gitleaks/gitleaks-action has no option to export the raw JSON
+        # report or to not fail the step on a finding -- it's designed to
+        # gate, not to produce evidence (secret-scan.yml already uses it
+        # for gating). Running the CLI image directly, as this report job
+        # needs: a JSON file this job can read, continuing past a nonzero
+        # exit so a real finding still reaches the report instead of
+        # aborting the job silently.
+        run: |
+          docker run --name gitleaks-report -v "$PWD:/repo" zricethezav/gitleaks:latest \
+            detect --source=/repo --report-format=json --report-path=/repo/gitleaks-report.json --no-banner || true
+          docker rm gitleaks-report
+
+      - name: Run npm audit
+        working-directory: website
+        run: |
+          npm ci
+          npm audit --json > ../npm-audit.json || true
+
+      - name: Generate the security report from real evidence (never claims PASS for missing evidence)
+        run: |
+          go run ./cmd/secreport \
+            -commit "${{ github.sha }}" \
+            -branch "${{ github.ref_name }}" \
+            -environment "github-actions" \
+            -govulncheck govulncheck.json \
+            -pip-audit pip-audit.json \
+            -trivy-go-image trivy-go-image.json \
+            -trivy-python-image trivy-python-image.json \
+            -trivy-go-dockerfile trivy-go-dockerfile.json \
+            -trivy-python-dockerfile trivy-python-dockerfile.json \
+            -gitleaks gitleaks-report.json \
+            -npm-audit npm-audit.json \
+            -npm-audit-baseline website/.security/npm-audit-baseline.json \
+            -json-out secreport.json \
+            -md-out secreport.md \
+            -vex-out vex.json
+          cat secreport.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: security-report
+          path: |
+            secreport.json
+            secreport.md
+            vex.json
+          retention-days: 90
