@@ -34,6 +34,7 @@ const sidebars = {
         'adr/documentation-as-code',
         'adr/f3-application-foundation',
         'adr/f4-security-supply-chain',
+        'adr/f5-templates-releases',
       ],
     },
     {
@@ -51,6 +52,8 @@ const sidebars = {
       label: 'Platform',
       items: [
         'platform/CONTRACTS',
+        'VERSIONING',
+        'RELEASES',
         { type: 'doc', id: 'generated/COMMANDS', label: 'Command reference (generated)' },
         { type: 'doc', id: 'generated/CONFIG', label: 'Environment variable reference (generated, Go)' },
       ],

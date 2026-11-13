@@ -1,0 +1,171 @@
+name: Trusted Release
+# Publishes a versioned, signed, SBOM'd release. Triggers ONLY on a pushed
+# `v*` tag -- never on pull_request, and tags should only ever be created
+# by pushing to `main` (not enforced by GitHub itself; documented
+# practice -- see docs/RELEASES.md). This mirrors supply-chain-attest.yml's
+# own trust boundary: privileged credentials (GHCR push, GitHub Release
+# creation, Sigstore signing) are only ever requested in this trusted,
+# tag-push context, never from PR-triggered code.
+#
+# NOT YET VERIFIED end-to-end (requires a real tag push, which this phase
+# does not do -- see docs/adr/0006-f5-templates-releases.md).
+on:
+  push:
+    tags:
+      - 'v*'
+permissions:
+  contents: read
+jobs:
+  validate-tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.4'
+      - name: Validate the pushed tag is real SemVer
+        id: version
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          go run ./cmd/semvercheck validate "$tag"
+          echo "version=$tag" >> "$GITHUB_OUTPUT"
+      - name: Refuse to overwrite an existing release for this tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "${GITHUB_REF#refs/tags/}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::A release already exists for ${GITHUB_REF#refs/tags/} -- refusing to overwrite. Delete it explicitly first if this is intentional, or push a new patch/minor tag."
+            exit 1
+          fi
+          echo "No existing release for this tag -- proceeding."
+
+  build-test-scan:
+    needs: validate-tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.4'
+      - name: Build (version-embedded)
+        run: |
+          go build -trimpath -ldflags="-X github.com/mangopep/forgestack/internal/platform/buildinfo.Version=${{ needs.validate-tag.outputs.version }}" \
+            -o bin/api ./cmd/api
+      - name: Test
+        run: go test -race ./...
+      - name: Build release images (not pushed yet -- that's the publish job, gated separately)
+        run: |
+          docker build -t forgestack:release-candidate .
+          docker build -t forgestack-python-api:release-candidate apps/python-api
+      - name: Scan both images (same gate as every other build -- a release is not exempt)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: forgestack:release-candidate
+          exit-code: '1'
+          severity: HIGH,CRITICAL
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: forgestack-python-api:release-candidate
+          exit-code: '1'
+          severity: HIGH,CRITICAL
+          ignore-unfixed: 'true' # same documented exception as python-ci.yml -- see issue #40
+
+  publish:
+    needs: [validate-tag, build-test-scan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write     # create the GitHub Release
+      packages: write     # push to GHCR
+      id-token: write      # short-lived OIDC identity for Sigstore keyless signing
+      attestations: write  # GitHub-native build provenance
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.4'
+
+      - name: Build release images
+        run: |
+          docker build -t "ghcr.io/${GITHUB_REPOSITORY,,}:${{ needs.validate-tag.outputs.version }}" .
+          docker build -t "ghcr.io/${GITHUB_REPOSITORY,,}-python-api:${{ needs.validate-tag.outputs.version }}" apps/python-api
+
+      - name: "Create SBOM output directory (SBOMs reuse F4's cmd/sbomcheck, not a parallel tool)"
+        run: mkdir -p sboms
+      - name: Generate Go image SBOM
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: "ghcr.io/${{ github.repository }}:${{ needs.validate-tag.outputs.version }}"
+          format: cyclonedx-json
+          output-file: sboms/sbom-go-raw.cdx.json
+      - name: Generate Python image SBOM
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: "ghcr.io/${{ github.repository }}-python-api:${{ needs.validate-tag.outputs.version }}"
+          format: cyclonedx-json
+          output-file: sboms/sbom-python-raw.cdx.json
+      - name: Augment + validate
+        run: |
+          for f in sboms/*-raw.cdx.json; do
+            name="$(basename "$f" | sed 's/-raw//')"
+            go run ./cmd/sbomcheck augment --producer "ForgeStack Release" \
+              --repository "${{ github.repository }}" --commit "${{ github.sha }}" \
+              "$f" "sboms/$name"
+            go run ./cmd/sbomcheck validate "sboms/$name"
+          done
+
+      - name: Log in to GHCR
+        # NOT YET VERIFIED -- requires a live tag push with registry
+        # permission, which this phase does not perform.
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: "Push images (immutable: tag matches the validated release version, never :latest alone)"
+        run: |
+          docker push "ghcr.io/${{ github.repository }}:${{ needs.validate-tag.outputs.version }}"
+          docker push "ghcr.io/${{ github.repository }}-python-api:${{ needs.validate-tag.outputs.version }}"
+
+      - name: Resolve pushed image digests (the immutable reference, not the mutable tag)
+        id: digests
+        run: |
+          go_digest="$(docker inspect --format='{{index .RepoDigests 0}}' "ghcr.io/${{ github.repository }}:${{ needs.validate-tag.outputs.version }}")"
+          py_digest="$(docker inspect --format='{{index .RepoDigests 0}}' "ghcr.io/${{ github.repository }}-python-api:${{ needs.validate-tag.outputs.version }}")"
+          echo "go_digest=$go_digest" >> "$GITHUB_OUTPUT"
+          echo "py_digest=$py_digest" >> "$GITHUB_OUTPUT"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v3.9.3
+        with:
+          cosign-release: 'v2.6.5'
+
+      - name: Sign the pushed image digests (keyless, bound to the immutable digest, not the tag)
+        run: |
+          cosign sign --yes "${{ steps.digests.outputs.go_digest }}"
+          cosign sign --yes "${{ steps.digests.outputs.py_digest }}"
+
+      - name: Attest build provenance for the signed digests
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-name: "ghcr.io/${{ github.repository }}"
+          subject-digest: "${{ steps.digests.outputs.go_digest }}"
+
+      - name: Create the GitHub Release (atomically last -- nothing above is user-visible until this succeeds)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ needs.validate-tag.outputs.version }}" \
+            --repo "${{ github.repository }}" \
+            --title "${{ needs.validate-tag.outputs.version }}" \
+            --notes "Source commit: ${{ github.sha }}. Go image: ${{ steps.digests.outputs.go_digest }}. Python image: ${{ steps.digests.outputs.py_digest }}. SBOMs and signatures attached." \
+            sboms/sbom-go.cdx.json sboms/sbom-python-api.cdx.json
