@@ -1,0 +1,13 @@
+{
+  "template": "go-service",
+  "template_version": "1.0.0",
+  "contract_version": "1.0.0",
+  "language": "go",
+  "placeholders": ["__MODULE_PATH__", "__SERVICE_NAME__", "__PORT__"],
+  "capabilities": {
+    "base": "always included: health/readiness, correlation IDs, structured logging, safe error wrapping, graceful shutdown",
+    "docker": "optional: Dockerfile + compose.yaml (hardened: non-root, digest-pinned, cap_drop ALL)",
+    "ci": "optional: .github/workflows/ci.yml (self-contained -- no reference to any other repository)"
+  },
+  "generated_project_depends_on_forgestack_repo": false
+}

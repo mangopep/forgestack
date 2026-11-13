@@ -1,0 +1,14 @@
+name: __SERVICE_NAME__
+services:
+  api:
+    build: .
+    ports:
+      - "127.0.0.1:__PORT__:__PORT__"
+    environment:
+      PORT: "__PORT__"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped

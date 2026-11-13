@@ -15,6 +15,7 @@ Extracted directly from `.github/workflows/*.yml` by line-oriented parsing of `n
 | `docs-check.yml` | Documentation Checks | push, pull_request |
 | `pages-deploy.yml` | Deploy Docs to GitHub Pages | push, workflow_dispatch |
 | `python-ci.yml` | Python API Quality Gates | push, pull_request |
+| `release.yml` | Trusted Release | push |
 | `sbom.yml` | SBOM Generation | push, workflow_dispatch |
 | `secret-scan.yml` | Secret Scanning | push, pull_request |
 | `security-report.yml` | Security Report | push, workflow_dispatch, schedule |
