@@ -136,7 +136,7 @@ by an auditor.
 |---|---|---|
 | Vulnerability management | SOC 2 CC7.1; ISO 27001 A.8.8; PCI DSS 6.3.1/11.3 | `govulncheck`/`pip-audit`/`npm audit`/Trivy run on every PR and weekly; findings tracked in `docs/security/findings-register.json` with owner + review date |
 | Secure development lifecycle | NIST SSDF PW.4, PW.7, PW.8 | SAST (CodeQL, 3 languages), Dockerfile linting (hadolint), IaC scanning (Trivy config), branch-protection-gated PRs on every change |
-| Secrets management | SOC 2 CC6.1; ISO 27001 A.8.24; PCI DSS 3.5/3.6 | `gitleaks` full-history scan on every PR; no committed secrets found (verified this session); no long-lived signing credentials exist to manage |
+| Secrets management | SOC 2 CC6.1; ISO 27001 A.8.24; PCI DSS 3.5/3.6 | `gitleaks` on every PR (that PR's commits, confirmed from a live run — not automatically full history) plus a full-history scan run locally/on demand; no committed secrets found either way; no long-lived signing credentials exist to manage |
 | Software composition / SBOM | NIST SSDF PW.4.1; PCI DSS 6.3.2 (to the extent it applies) | CycloneDX SBOMs for the Go module and both container images, validated against NTIA/CISA minimum elements (`cmd/sbomcheck`) |
 | Build integrity / provenance | SLSA v1.0 (see below); NIST SSDF PS.1-PS.3 | `actions/attest-build-provenance` (GitHub-native, in-toto-based) on `main`-only builds; Sigstore keyless signing |
 | Change management | SOC 2 CC8.1; ISO 27001 A.8.32 | Branch-protection rulesets (8 required status checks, PR-only, zero bypass actors), gitflow promotion (F3) |

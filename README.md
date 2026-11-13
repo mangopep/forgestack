@@ -52,7 +52,7 @@ bypass actors, 8 required status checks) and:
 | Dependency vulnerabilities (Go) | `govulncheck` (reachability-aware) | **Verified** — zero findings as of this writing |
 | Dependency vulnerabilities (Python) | `pip-audit` | **Verified** — zero findings as of this writing |
 | Dependency vulnerabilities (JS, build tooling) | `npm audit` against a reviewed, dated baseline | **Verified** — 26 pre-existing, documented, dev-tooling-only findings; no known safe fix yet |
-| Secret scanning | `gitleaks`, full git history | **Verified** — 57 commits scanned, zero leaks |
+| Secret scanning | `gitleaks` on every PR (that PR's commits); a deeper full-history scan is run locally/on demand, not automatically on every PR | **Verified** — zero leaks on every PR run to date; a full-history local scan also found zero |
 | Container image scanning | Trivy (image + Dockerfile config) | **Verified** — Go image: 0 findings; Python image: 98 OS-package findings, all with no available upstream fix, tracked exception |
 | SBOM generation | CycloneDX (Go module + both container images), validated against NTIA/CISA minimum elements | **Verified locally** — see `cmd/sbomcheck` |
 | VEX vulnerability assessment | OpenVEX-shaped statements, evidence + reviewer + reassessment date required | **Verified locally** — see `cmd/secreport` |
