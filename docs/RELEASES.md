@@ -4,23 +4,25 @@ title: Trusted releases
 
 # Trusted releases
 
-**Status: designed and committed locally, NOT YET VERIFIED end-to-end.** `.github/workflows/release.yml`
-has never run — it requires a real `v*` tag push, which this phase does not do (see
-`docs/adr/0006-f5-templates-releases.md`). Everything below describes the design and what
-was verified using **local fixtures** instead of a live run.
+**Status: exercised once for real (`v0.1.0`, see the incident below), partially succeeded,
+fixes applied, not yet re-attempted.** `validate-tag` and `build-test-scan` have both now
+run live and passed; `publish` has run live once and failed partway through. See
+"`v0.1.0` failed-attempt history" below for exactly what happened, what state the
+repository is in right now, and what changed as a result before any next attempt.
 
 ## Pipeline overview
 
 ```mermaid
 flowchart LR
     tag["git tag vX.Y.Z"] --> validate["validate-tag:\nancestry guard (scripts/check-tag-ancestry.sh)\nSemVer check (cmd/semvercheck)\nrefuse duplicate release"]
-    validate --> buildtest["build-test-scan:\nbuild + test + Trivy scan\n(same gate as every other build)"]
-    buildtest --> publish["publish:\nbuild images -> push to GHCR\n-> SBOM (cmd/sbomcheck) -> sign (cosign)\n-> attest provenance -> GitHub Release"]
+    validate --> buildtest["build-test-scan:\nbuild (version-embedded) + test\nverify image version + Trivy scan"]
+    buildtest --> preflight["publish: registry push-access preflight\n(scripts/preflight-registry-push-access.sh,\nboth image paths, before building anything)"]
+    preflight --> publish["publish: build images -> verify version\n-> push to GHCR -> SBOM -> sign -> attest\n-> GitHub Release"]
 
     classDef trusted fill:#2f855a,color:#fff,stroke:#22543d
     classDef gap fill:#c53030,color:#fff,stroke:#822727,stroke-dasharray: 4 3
     class validate,buildtest trusted
-    class publish gap
+    class preflight,publish gap
 ```
 
 **The tagged commit must be reachable from `main`** — enforced by a real `git merge-base
@@ -38,6 +40,118 @@ The `publish` job is the one carrying privileged credentials (`contents: write`,
 not-yet-verified step. `validate-tag` and `build-test-scan` are identical in trust level to
 every other CI job in this repository.
 
+## `v0.1.0` failed-attempt history
+
+**2026-11-13, first-ever live run of `release.yml`.** Tag `v0.1.0` pushed against the
+verified `main` commit `7a507f3cbd06a8d6b9652208ce00f46e979e4d10`.
+
+### What happened, confirmed from the actual job logs
+
+- `validate-tag`: **passed**. Ancestry guard confirmed the commit reachable from `main`;
+  `v0.1.0` validated as real SemVer; no pre-existing release for that tag.
+- `build-test-scan`: **passed**. Build, race-detected tests, both Trivy scans all clean.
+- `publish`: **failed partway through.**
+  - `ghcr.io/mangopep/forgestack:v0.1.0` — pushed **successfully**, digest
+    `sha256:671b4e3e74900e7c3b241d68cb11c8d86025c3465eee46b407d26d4a023f1861`.
+  - `ghcr.io/mangopep/forgestack-python-api:v0.1.0` — several layers uploaded, then
+    `error from registry: denied` on the final manifest push. The tag never resolves;
+    `docker pull` against it returns "not found."
+  - Everything after the failed push (digest resolution, cosign install, **signing**,
+    **attestation**, **GitHub Release creation**) was correctly **skipped** by the
+    job's own fail-fast behavior — confirmed via `gh run view`'s per-step status. No
+    signature, no attestation, no Release exist for either image.
+
+### Diagnosis — confirmed vs. hypothesis, kept separate on purpose
+
+**Confirmed** (from logs and independent verification after the run):
+- The Go image push succeeded and is genuinely pullable (`docker pull --platform
+  linux/amd64 ghcr.io/mangopep/forgestack@sha256:671b4e...`, tested, worked, container ran,
+  `/healthz` responded).
+- The Go image's running container reported `"version":"dev"`, not `"v0.1.0"` — a **second,
+  separate, confirmed bug**: `release.yml`'s `publish` job built the image with plain
+  `docker build` (no `--build-arg VERSION=...`), and neither Dockerfile had an `ARG`/`ENV`
+  wired to receive one. The version embedding was never actually connected to the real
+  Docker build path — only to a throwaway native `go build` in `build-test-scan` that
+  built a binary nothing else used. **Fixed** — see "What changed" below.
+- No signature, no attestation, no GitHub Release exist for either image (`cosign verify`:
+  `no signatures found`; `gh attestation verify`: `404`; `gh release view`: not found).
+- Docker's own push error output provided no detail beyond the literal string `"denied"` —
+  this is a known limitation of the Docker CLI's push error reporting, not something this
+  investigation chose to omit.
+
+**Hypothesis, not confirmed** (the actual root cause of the GHCR "denied"):
+- The most likely explanation is a GHCR first-time-package-creation permission nuance
+  specific to a package name that differs from the repository name
+  (`forgestack-python-api` vs. the repository `forgestack`) — the identically-configured
+  push to the repository-matching package name (`forgestack`) succeeded moments earlier
+  with the same token, in the same job.
+- **Could not be independently confirmed**: inspecting GHCR's own package settings (visibility,
+  repository linkage, creation history) requires `read:packages` scope, which this
+  investigation's GitHub CLI session does not have — and was not requested, since
+  expanding token scope wasn't asked for and this investigation stayed within read-only,
+  already-available access. GitHub's public package pages for both `forgestack` and
+  `forgestack-python-api` both return HTTP 200, which is inconclusive (the page renders
+  generically regardless of whether a package has any pushed versions).
+- **This is the one unresolved external blocker** this investigation could not close. The
+  new preflight check below (`scripts/preflight-registry-push-access.sh`) is built to catch
+  this class of problem *before* any image is built on the next real attempt, but the
+  preflight script itself has only been verified against its failure path (confirmed
+  against live GHCR with an invalid token) — its success path has not been proven against
+  real valid credentials, since doing so would require an actual push attempt.
+
+### What changed as a result (this branch)
+
+1. **Version embedding, fixed in both Dockerfiles.** `Dockerfile` and
+   `apps/python-api/Dockerfile` now accept `ARG VERSION` (defaulting to `dev` /
+   `docker-build` for ordinary, non-release builds) and wire it into the Go `ldflags`
+   / Python `SERVICE_VERSION` respectively. `release.yml` now passes
+   `--build-arg VERSION=<tag>` when building release images, in both the
+   `build-test-scan` and `publish` jobs.
+2. **A real test for this, `scripts/verify-release-image-version.sh`**, runs the built
+   image and asserts `/healthz`'s `version` field matches the expected release version —
+   wired into `build-test-scan` (fails the build before any push is attempted) and into
+   `publish` immediately after building the real images (fails before any push). Verified
+   locally: passes for both languages when the build-arg is supplied, fails correctly (and
+   clearly) when it isn't — the exact bug `v0.1.0` shipped.
+3. **A new registry push-access preflight**, `scripts/preflight-registry-push-access.sh`,
+   probes push permission for both image paths (via a blob-upload session that's
+   immediately cancelled — nothing becomes publishable) *before* any image is built.
+   Confirmed working against the real GHCR server for its failure path; its success path
+   is unverified (see "Diagnosis" above).
+4. **Explicit partial-failure reporting**: `publish` now writes a clear
+   `$GITHUB_STEP_SUMMARY` block on any failure, naming the exact commands to run before
+   assuming anything about the release's state — never silently leaving a reader to infer
+   it from which steps show a red X.
+
+### Current state of `v0.1.0` — nothing further touched
+
+| Artifact | State |
+|---|---|
+| Tag `v0.1.0` | exists, points at the correct commit — **not moved or deleted** |
+| `ghcr.io/mangopep/forgestack:v0.1.0` | published, unsigned, unattested, reports `version: "dev"` — **not deleted or replaced** |
+| `ghcr.io/mangopep/forgestack-python-api:v0.1.0` | does not exist (tag never resolved) |
+| GitHub Release `v0.1.0` | does not exist |
+
+### Recovery procedure for this exact situation
+
+Per policy, `v0.1.0` is **never** reused, moved, or force-overwritten, and the dangling Go
+image is **never** silently deleted as a reflex:
+
+1. Confirm the current state yourself before acting on anything above (the exact commands
+   are in `publish`'s own failure summary, and above).
+2. The next release attempt uses a **new** tag — `v0.1.1` (prepared below, not yet created
+   or pushed).
+3. `v0.1.0`'s dangling, unsigned Go image is left in place unless/until a separate,
+   explicit decision is made to delete it — that decision belongs to whoever owns the
+   registry, not to this automation.
+
+## `v0.1.1` — prepared, not tagged
+
+The fixes above are ready to be exercised by a `v0.1.1` tag once separately approved. No
+tag has been created. When it is: `go run ./cmd/semvercheck compat v0.1.0 v0.1.1` classifies
+it as `patch` (bug fixes only, no new capability) — consistent with this being a repair of
+`v0.1.0`'s own release pipeline, not a new feature.
+
 ## Preventing accidental duplicate versions, tag overwrites, and partial releases
 
 - **Duplicate tag/version**: `validate-tag` calls `gh release view <tag>` before anything
@@ -51,11 +165,13 @@ every other CI job in this repository.
   `publish` job, after images are pushed, SBOMs generated/validated, and signatures/
   attestations created. If any earlier step fails, the job fails and no Release is
   created — there is no state where a Release exists but its artifacts don't (or vice
-  versa) from a single run. A failed run before the Release step leaves GHCR with tagged-
-  but-unreleased images; this is a known, accepted gap (see "Rollback" below for how to
-  deal with that if it ever happens) rather than something an atomic-transaction
-  mechanism was built to prevent — GHCR itself has no multi-artifact transaction
-  primitive to build on.
+  versa) from a single run. **This is not hypothetical** — `v0.1.0`'s real first attempt
+  hit exactly this: one image pushed, the other failed, and because the Release step
+  never ran, no Release exists for either. See "`v0.1.0` failed-attempt history" above for
+  the full account and current state. A failed run before the Release step leaves GHCR
+  with a tagged-but-unreleased image; this is a known, accepted gap (see "Rollback" below)
+  rather than something an atomic-transaction mechanism was built to prevent — GHCR itself
+  has no multi-artifact transaction primitive to build on.
 
 ## Evidence chain: release version → source commit → build → artifact digest → SBOM → attestation
 
@@ -123,9 +239,12 @@ docker pull ghcr.io/mangopep/forgestack@sha256:<previous-release-digest>
 ```
 
 If a partial release occurred (images pushed, no GitHub Release — see "partial releases"
-above): delete the orphaned GHCR tags manually (`gh api -X DELETE ...` or the GHCR UI) and
-re-push a **new** patch tag (never reuse the failed tag name) once the underlying issue is
-fixed — consistent with "never silently overwrite a version."
+above, and `v0.1.0`'s real incident above): deleting the orphaned GHCR image is an
+available action (`gh api -X DELETE ...` or the GHCR UI), but it is a deliberate, separate,
+human decision — not an automatic cleanup step, and not something to do as a reflex the
+moment a failure is noticed. Confirm the actual state first (the commands in `publish`'s
+own failure summary). Either way, the next attempt uses a **new** patch tag — never reuse
+the failed tag name.
 
 ## Security notes
 
