@@ -94,6 +94,23 @@ IDs, and a consistent error-response shape.
 - **Adding a third language or service** doesn't require touching the first two — see
   `docs/platform/CONTRACTS.md`'s extension guidance.
 
+### Start a new product from a template
+
+```bash
+scripts/new-service.sh go /path/to/new-project --name my-service --port 9090 \
+  --module github.com/you/my-service --validate
+scripts/new-service.sh python /path/to/new-project --name my-service --port 9090 --validate
+```
+
+Generates a complete, standalone project (health/readiness, correlation IDs, structured
+logging, a hardened Dockerfile, self-contained CI) with **no dependency on ForgeStack's own
+repository** — verified by actually generating, building, testing, and running example
+projects from both templates. `--validate` builds and tests the generated project in
+place before you touch it. See [`docs/VERSIONING.md`](docs/VERSIONING.md) for template
+versioning, compatibility, and upgrade policy, and
+[`docs/RELEASES.md`](docs/RELEASES.md) for how ForgeStack's own trusted-release pipeline
+reuses the same SBOM/signing tooling (not yet exercised on a live tag push).
+
 ## Quick start
 
 No AWS account, no cloud bill, no signup.
@@ -125,9 +142,10 @@ See [`docs/COMMANDS.md`](docs/COMMANDS.md) for every command this repository use
 | F1 | Branch-protected gitflow (`feature/* → develop → staging → main`), CI baseline | **Implemented**, live on GitHub (see `docs/adr/0002-gitflow-branching-strategy.md`) |
 | F2 | Documentation-as-code (this Docusaurus site, generated references, link/diagram validation) | **Implemented**, live on GitHub Pages (`docs/adr/0003-documentation-as-code.md`) |
 | F3 | Go + Python application foundation, shared service contract | **Implemented**, live on `main` (`docs/adr/0004-f3-application-foundation.md`) |
-| F4 | Security & supply-chain foundation (this document's table above) | **Implemented locally**; signing/attestation workflows not yet exercised on live CI (`docs/adr/0005-f4-security-supply-chain.md`) |
-| F5–F10 | Audit & Trust evidence expansion (infra/access/incident/backup evidence collection) | **Roadmap only** — see `docs/ROADMAP.md`'s "Audit & Trust" module |
-| Trust Center | Customer-facing evidence sharing, independent-certification tracking | **Roadmap only**, deliberately deferred until a real product needs it |
+| F4 | Security & supply-chain foundation (this document's table above) | **Implemented and live on `main`**, including a verified live run of keyless signing + GitHub-native attestation (`docs/adr/0005-f4-security-supply-chain.md`) |
+| F5 | Reusable Go/Python templates, SemVer policy, trusted-release pipeline | **Implemented locally**, not yet pushed; release pipeline verified with local fixtures only, not a live tag push (`docs/adr/0006-f5-templates-releases.md`) |
+| F6–F20 | Future phases (not yet scoped in detail; see `docs/ROADMAP.md`) | **Not started** |
+| Audit & Trust module | Evidence-collection expansion (infra/access/incident/backup), later a customer-facing Trust Center | **Roadmap only**, unscheduled against a specific F-number — see `docs/ROADMAP.md`'s "Audit & Trust" module |
 
 ForgeStack never self-issues a certification. If an independent audit is ever obtained for a
 product built on ForgeStack, it is tracked as an external fact (issuing authority, verified
@@ -139,13 +157,19 @@ scope, issuance/expiry dates) — never granted by this repository's own tooling
 - `apps/python-api`: Python (FastAPI) reference service
 - `cmd/secreport`, `internal/secreport`: security report + VEX document generator
 - `cmd/sbomcheck`, `internal/sbomcheck`: SBOM minimum-elements validator/augmenter
+- `cmd/semvercheck`, `internal/semver`: SemVer validation and compatibility classification
+- `templates/go-service`, `templates/python-service`: reusable project templates, each with
+  its own nested `go.mod`/`pyproject.toml` so they're never part of this repository's own
+  build
+- `scripts/new-service.sh`: generates a new, standalone project from a template
 - `cmd/docgen`: generates `docs/generated/*` directly from source; CI fails if these drift
 - `compose.yaml`, `Dockerfile`, `apps/python-api/Dockerfile`: hardened local containers
   (digest-pinned, non-root, read-only, zero Linux capabilities)
 - `infrastructure/terraform/aws-s3-sandbox`: safe-by-default opt-in Terraform example
 - `website/`: Docusaurus site that publishes `docs/` to GitHub Pages
 - `.github/workflows`: CI, lint, SAST, secret/container/IaC scanning, SBOM generation,
-  signing/attestation, weekly deep security rescan, docs-check, Pages deploy — no cloud
+  signing/attestation, weekly deep security rescan, docs-check, Pages deploy, and a
+  tag-gated trusted-release pipeline (`release.yml`, not yet exercised) — no cloud
   auto-deploy anywhere
 - `docs/security/`: vulnerability lifecycle, findings register
 - `docs/architecture/`: trust boundaries, supply-chain security, application architecture
