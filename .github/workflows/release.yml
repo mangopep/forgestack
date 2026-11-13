@@ -71,16 +71,24 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.4'
-      - name: Build (version-embedded)
-        run: |
-          go build -trimpath -ldflags="-X github.com/mangopep/forgestack/internal/platform/buildinfo.Version=${{ needs.validate-tag.outputs.version }}" \
-            -o bin/api ./cmd/api
       - name: Test
         run: go test -race ./...
-      - name: Build release images (not pushed yet -- that's the publish job, gated separately)
+      - name: "Build release images (not pushed yet -- that's the publish job, gated separately)"
+        # --build-arg VERSION matches exactly what the publish job will
+        # pass -- this is what actually caught v0.1.0's real bug: a
+        # separate native `go build -ldflags ...` here (the previous
+        # version of this step) exercised different code than what the
+        # Docker build actually ran, so it passed while the real,
+        # published image silently kept reporting "dev". Building the
+        # real image here, with the real build-arg, is the only way this
+        # check means anything.
         run: |
-          docker build -t forgestack:release-candidate .
-          docker build -t forgestack-python-api:release-candidate apps/python-api
+          docker build --build-arg "VERSION=${{ needs.validate-tag.outputs.version }}" -t forgestack:release-candidate .
+          docker build --build-arg "VERSION=${{ needs.validate-tag.outputs.version }}" -t forgestack-python-api:release-candidate apps/python-api
+      - name: "Verify the built images actually report the release version (not \"dev\"/\"docker-build\")"
+        run: scripts/verify-release-image-version.sh forgestack:release-candidate 8080 "${{ needs.validate-tag.outputs.version }}"
+      - name: Verify the Python image too
+        run: scripts/verify-release-image-version.sh forgestack-python-api:release-candidate 8081 "${{ needs.validate-tag.outputs.version }}"
       - name: Scan both images (same gate as every other build -- a release is not exempt)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -122,10 +130,27 @@ jobs:
         id: repo
         run: echo "path=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
+      - name: "Preflight: confirm push access to both GHCR repository paths before building anything"
+        # v0.1.0's real failure was a registry-level "denied" discovered
+        # only after build/scan/sign had already run for one of the two
+        # images. This probes push permission for BOTH package paths up
+        # front (via a blob-upload session that is immediately cancelled
+        # -- nothing becomes publishable) so a naming/permission problem
+        # fails here, before any image is built.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          scripts/preflight-registry-push-access.sh "${{ steps.repo.outputs.path }}" "${{ github.actor }}" "$GH_TOKEN"
+          scripts/preflight-registry-push-access.sh "${{ steps.repo.outputs.path }}-python-api" "${{ github.actor }}" "$GH_TOKEN"
+
       - name: Build release images
         run: |
-          docker build -t "ghcr.io/${{ steps.repo.outputs.path }}:${{ needs.validate-tag.outputs.version }}" .
-          docker build -t "ghcr.io/${{ steps.repo.outputs.path }}-python-api:${{ needs.validate-tag.outputs.version }}" apps/python-api
+          docker build --build-arg "VERSION=${{ needs.validate-tag.outputs.version }}" -t "ghcr.io/${{ steps.repo.outputs.path }}:${{ needs.validate-tag.outputs.version }}" .
+          docker build --build-arg "VERSION=${{ needs.validate-tag.outputs.version }}" -t "ghcr.io/${{ steps.repo.outputs.path }}-python-api:${{ needs.validate-tag.outputs.version }}" apps/python-api
+      - name: "Verify the images about to be published report the release version"
+        run: |
+          scripts/verify-release-image-version.sh "ghcr.io/${{ steps.repo.outputs.path }}:${{ needs.validate-tag.outputs.version }}" 8080 "${{ needs.validate-tag.outputs.version }}"
+          scripts/verify-release-image-version.sh "ghcr.io/${{ steps.repo.outputs.path }}-python-api:${{ needs.validate-tag.outputs.version }}" 8081 "${{ needs.validate-tag.outputs.version }}"
 
       - name: "Create SBOM output directory (SBOMs reuse F4's cmd/sbomcheck, not a parallel tool)"
         run: mkdir -p sboms
@@ -199,3 +224,33 @@ jobs:
             --title "${{ needs.validate-tag.outputs.version }}" \
             --notes "Source commit: ${{ github.sha }}. Go image: ${{ steps.digests.outputs.go_digest }}. Python image: ${{ steps.digests.outputs.py_digest }}. SBOMs and signatures attached." \
             sboms/sbom-go.cdx.json sboms/sbom-python.cdx.json
+
+      - name: "PARTIAL RELEASE: report exact state, do not assume anything below this point happened"
+        # Runs only if an earlier step in this job failed. A failed
+        # `publish` job must never be read as "nothing happened" -- some
+        # steps before the failure point may have already pushed an
+        # image, uploaded blobs, or taken another partially-visible
+        # action. This makes that explicit in the job summary rather
+        # than relying on a reader to infer it from which steps show a
+        # red X. See docs/RELEASES.md's "v0.1.0 failed-attempt history"
+        # for exactly this scenario, including why no image is ever
+        # deleted or retagged automatically to "fix" a partial failure --
+        # that decision requires a human to look at the actual state
+        # first (gh release view, docker manifest inspect, cosign
+        # verify), per docs/RELEASES.md's recovery procedure.
+        if: failure()
+        run: |
+          {
+            echo "## :rotating_light: Partial release failure for ${{ needs.validate-tag.outputs.version }}"
+            echo ""
+            echo "One or more steps in this job failed. Do NOT assume the release did not happen --"
+            echo "check each of these explicitly before taking any action:"
+            echo ""
+            echo "- \`docker manifest inspect ghcr.io/${{ steps.repo.outputs.path }}:${{ needs.validate-tag.outputs.version }}\`"
+            echo "- \`docker manifest inspect ghcr.io/${{ steps.repo.outputs.path }}-python-api:${{ needs.validate-tag.outputs.version }}\`"
+            echo "- \`gh release view ${{ needs.validate-tag.outputs.version }} --repo ${{ github.repository }}\`"
+            echo "- \`cosign verify\` against both image references above"
+            echo ""
+            echo "See docs/RELEASES.md's recovery procedure. Never delete, retag, or replace a"
+            echo "published artifact as a reflex -- confirm the real state first."
+          } >> "$GITHUB_STEP_SUMMARY"
