@@ -68,6 +68,22 @@ else
   fail_count=$((fail_count + 1))
 fi
 
+echo "--- Attestation digest handling (the v0.1.1 bug: full reference vs. bare digest) ---"
+if "$script_dir/test-validate-image-digest.sh"; then
+  echo "PASS: validate-image-digest test suite"
+  pass_count=$((pass_count + 1))
+else
+  echo "FAIL: validate-image-digest test suite"
+  fail_count=$((fail_count + 1))
+fi
+if "$script_dir/test-select-single-repo-digest.sh"; then
+  echo "PASS: select-single-repo-digest test suite"
+  pass_count=$((pass_count + 1))
+else
+  echo "FAIL: select-single-repo-digest test suite"
+  fail_count=$((fail_count + 1))
+fi
+
 echo "--- Cleanup ---"
 docker rm -f \
   "$(docker ps -aq --filter ancestor=forgestack:pipeline-test)" \
