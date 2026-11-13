@@ -32,5 +32,45 @@ Every lab follows: **understand -> build -> test -> break -> observe -> diagnose
 
 Also cover production code review, performance profiles, pprof, race detection, zero-downtime releases, security scanning, dependency update automation, AWS quotas, regional resilience, SOC2/CIS concepts, cost quotas, and operational ownership.
 
+## Optional module: Audit & Trust (reusable, not yet operational)
+
+Goal: any product built on ForgeStack should be able to prepare for an enterprise
+security review or independent audit using trustworthy, continuously collected
+evidence — not a hand-assembled spreadsheet the week before an audit.
+
+This is explicitly optional and phased, not a new always-on service:
+
+- **F4 (implemented now)**: evidence foundations only. `cmd/secreport` already
+  produces versioned (`schema_version`), linked (repository/commit/branch; product/
+  environment/owner fields added in this phase) evidence from real scanner output,
+  with explicit `PASS`/`FAIL`/`BLOCKED` (missing evidence)/`NOT_VERIFIED`/`EXPIRED`
+  states — never a fabricated or assumed result. Control mappings exist for SOC 2,
+  ISO 27001, ISO 42001, and NIST SSDF as a documentation table (see
+  `docs/architecture/SUPPLY-CHAIN-SECURITY.md`), explicitly marked as evidence, not
+  certification. Automated collection today covers CI scan results, SBOMs, and
+  signed-artifact evidence only.
+- **F5-F10 (future, not started)**: expand automated collection to infrastructure
+  state, access reviews, incident records, backup/recovery verification, and
+  security test results — each one a separate, reviewable change, not a single
+  rewrite. Add reviewer comments, remediation tasks, and evidence-request tracking
+  on top of the existing exception/finding register. Add real tamper-evidence
+  (e.g. a hash chain or external timestamping service) if/when retention
+  requirements actually justify it — today's evidence retention is explicitly
+  **not** immutable (GitHub Actions artifact storage, 90-day retention, ordinary
+  repo-write access controls — see `SUPPLY-CHAIN-SECURITY.md`'s retention section).
+- **Later, when justified (not started)**: a reusable, product-agnostic "Trust
+  Center" — customer-facing evidence sharing with approval workflow, confidentiality
+  controls, expiry, access logs, and document versioning; tracking of actual
+  independent certifications (issuing authority, verified scope, issuance/expiry
+  dates) — **ForgeStack never self-issues a certification**, it only records ones a
+  real external auditor issued. This is deliberately not built until a real product
+  on ForgeStack needs it — building it speculatively would be exactly the
+  unjustified complexity this repository's own engineering principle warns against.
+
+Manual, organizational controls (e.g. "did a human actually review access this
+quarter") are tracked separately from automatically-verified technical controls
+(e.g. "did Trivy actually run") from the start — conflating the two would let an
+unverified manual claim borrow the credibility of a real automated check.
+
 ## Completion standard
 Explain every command and flag; show expected output, risk, and safe undo. Record evidence in `docs/incidents/` and `docs/cost-reports/`.

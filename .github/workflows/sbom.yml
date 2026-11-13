@@ -1,0 +1,105 @@
+name: SBOM Generation
+# Generates CycloneDX SBOMs for the Go module and both container images,
+# augments each with producer/commit metadata syft doesn't set on its own
+# (cmd/sbomcheck augment), and validates every one against the NTIA/CISA
+# minimum-elements baseline (cmd/sbomcheck validate) before uploading it —
+# an SBOM that fails that validation fails this job, not a silent partial
+# artifact. Runs on push to the three long-lived branches (not every PR --
+# SBOMs are a release-evidence artifact, not a per-PR gate; see F4's "fast,
+# reliable PR gates" vs "full scanning on approved release paths" split)
+# and can be triggered manually for ad-hoc inspection.
+on:
+  push:
+    branches: [main, staging, develop]
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  sbom-go-module:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.4'
+      - name: Generate Go module SBOM (CycloneDX)
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: sbom-go-raw.cdx.json
+      - name: Augment with producer and commit metadata
+        run: |
+          go run ./cmd/sbomcheck augment --producer "ForgeStack CI" \
+            --repository "${{ github.repository }}" --commit "${{ github.sha }}" \
+            sbom-go-raw.cdx.json sbom-go.cdx.json
+      - name: Validate against NTIA/CISA minimum elements
+        run: go run ./cmd/sbomcheck validate sbom-go.cdx.json
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: sbom-go-module
+          path: sbom-go.cdx.json
+          retention-days: 90
+  sbom-go-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.4'
+      - name: Build image locally (not pushed to any registry)
+        run: docker build -t forgestack:sbom-scan .
+      - name: Generate container image SBOM (CycloneDX)
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: forgestack:sbom-scan
+          format: cyclonedx-json
+          output-file: sbom-go-image-raw.cdx.json
+      - name: Augment with producer and commit metadata
+        run: |
+          go run ./cmd/sbomcheck augment --producer "ForgeStack CI" \
+            --repository "${{ github.repository }}" --commit "${{ github.sha }}" \
+            sbom-go-image-raw.cdx.json sbom-go-image.cdx.json
+      - name: Validate against NTIA/CISA minimum elements
+        run: go run ./cmd/sbomcheck validate sbom-go-image.cdx.json
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: sbom-go-image
+          path: sbom-go-image.cdx.json
+          retention-days: 90
+  sbom-python-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.4'
+      - name: Build image locally (not pushed to any registry)
+        run: docker build -t forgestack-python-api:sbom-scan apps/python-api
+      - name: Generate container image SBOM (CycloneDX)
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: forgestack-python-api:sbom-scan
+          format: cyclonedx-json
+          output-file: sbom-python-image-raw.cdx.json
+      - name: Augment with producer and commit metadata
+        run: |
+          go run ./cmd/sbomcheck augment --producer "ForgeStack CI" \
+            --repository "${{ github.repository }}" --commit "${{ github.sha }}" \
+            sbom-python-image-raw.cdx.json sbom-python-image.cdx.json
+      - name: Validate against NTIA/CISA minimum elements
+        run: go run ./cmd/sbomcheck validate sbom-python-image.cdx.json
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: sbom-python-image
+          path: sbom-python-image.cdx.json
+          retention-days: 90

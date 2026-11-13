@@ -33,6 +33,7 @@ const sidebars = {
         'adr/gitflow-branching-strategy',
         'adr/documentation-as-code',
         'adr/f3-application-foundation',
+        'adr/f4-security-supply-chain',
       ],
     },
     {
@@ -84,7 +85,13 @@ const sidebars = {
     {
       type: 'category',
       label: 'Security',
-      items: ['architecture/SECURITY-TRUST-BOUNDARIES', 'SECURITY-AUDIT', 'AUTOMATED-CODE-REVIEW'],
+      items: [
+        'architecture/SECURITY-TRUST-BOUNDARIES',
+        'architecture/SUPPLY-CHAIN-SECURITY',
+        'security/VULNERABILITY-LIFECYCLE',
+        'SECURITY-AUDIT',
+        'AUTOMATED-CODE-REVIEW',
+      ],
     },
     {
       type: 'category',

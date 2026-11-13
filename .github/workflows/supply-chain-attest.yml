@@ -1,0 +1,109 @@
+name: Supply-Chain Signing & Provenance
+# Signs and attests the generated SBOMs on the already-promoted main
+# branch only -- the one trusted, approval-gated path (F3's gitflow). Never
+# runs on pull_request: a fork PR must never have id-token/attestations
+# write access, which this job needs to request a short-lived Sigstore
+# OIDC identity and publish a GitHub-native attestation. No container
+# image is pushed to any registry (see container-scan.yml/python-ci.yml --
+# this repo pushes nothing), so this attests the build artifacts that
+# genuinely exist: the CycloneDX SBOMs.
+#
+# NOT YET VERIFIED end-to-end on a live run (requires a real push to main,
+# which this phase does not do) -- see docs/adr/0005-f4-security-supply-chain.md
+# and the F4 final report for what's implemented vs. what's pending a live
+# first run.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  sign-and-attest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write # short-lived OIDC identity for Sigstore keyless signing
+      attestations: write # GitHub-native build provenance
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.4'
+
+      - name: Build images locally (not pushed to any registry)
+        run: |
+          docker build -t forgestack:attest-scan .
+          docker build -t forgestack-python-api:attest-scan apps/python-api
+
+      - name: Create SBOM output directory
+        run: mkdir -p sboms sboms-raw
+
+      - name: Generate Go module SBOM (CycloneDX)
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: sboms-raw/sbom-go.cdx.json
+      - name: Generate Go image SBOM (CycloneDX)
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: forgestack:attest-scan
+          format: cyclonedx-json
+          output-file: sboms-raw/sbom-go-image.cdx.json
+      - name: Generate Python image SBOM (CycloneDX)
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: forgestack-python-api:attest-scan
+          format: cyclonedx-json
+          output-file: sboms-raw/sbom-python-image.cdx.json
+
+      - name: Augment and validate every SBOM before signing
+        # Signing a non-compliant SBOM would just produce a verifiably
+        # authentic but incomplete document -- validate (against the
+        # NTIA/CISA minimum elements) before it's ever signed, not after.
+        run: |
+          for f in sboms-raw/*.cdx.json; do
+            name="$(basename "$f")"
+            go run ./cmd/sbomcheck augment --producer "ForgeStack CI" \
+              --repository "${{ github.repository }}" --commit "${{ github.sha }}" \
+              "$f" "sboms/$name"
+            go run ./cmd/sbomcheck validate "sboms/$name"
+          done
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v3.9.3
+        with:
+          cosign-release: 'v2.6.5'
+
+      - name: Sign each SBOM (Sigstore keyless, short-lived OIDC identity)
+        run: |
+          for f in sboms/*.cdx.json; do
+            echo "Signing $f"
+            cosign sign-blob --yes --bundle "${f}.bundle" "$f"
+          done
+
+      - name: Self-verify signatures immediately (fail fast on config errors)
+        run: |
+          for f in sboms/*.cdx.json; do
+            echo "Verifying $f"
+            cosign verify-blob \
+              --bundle "${f}.bundle" \
+              --certificate-identity-regexp "^https://github.com/${{ github.repository }}/" \
+              --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+              "$f"
+          done
+
+      - name: Attest build provenance for each SBOM
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: 'sboms/*.cdx.json'
+
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: signed-sboms
+          path: sboms/
+          retention-days: 90

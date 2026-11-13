@@ -1,0 +1,51 @@
+{
+  "_comment": "Hand-maintained register of every tracked exception/finding this repository carries, cross-referenced with the machine-generated secreport.json/vex.json (cmd/secreport). Update this file in the same PR that changes an exception's scope or review date.",
+  "schema_version": "1.0.0",
+  "entries": [
+    {
+      "id": "#35",
+      "title": "26 pre-existing npm audit findings in website/ (Docusaurus dev-tooling deps)",
+      "severity_breakdown": { "critical": 16, "high": 1, "moderate": 6, "low": 3 },
+      "affected_component": "website/package-lock.json (tinypool, webpack-dev-server, sockjs, serialize-javascript, copy-webpack-plugin, css-minimizer-webpack-plugin, uuid, @svgr/*, deepmerge)",
+      "fixed_version": "none safe -- npm's own suggested fix is a Docusaurus DOWNGRADE to 3.7.0 (older than the pinned 3.10.2), rejected: not a safe/compatible fix, risks breaking @docusaurus/theme-mermaid and the local-search plugin",
+      "exploitability_context": "build/dev-tooling only (npm start, docusaurus build) -- none of the affected packages ship in website/build/, the deployed static site",
+      "environment": "local development and CI build tooling, not the published site",
+      "owner": "mangopep",
+      "evidence": "website/.security/npm-audit-baseline.json, scripts/check-npm-audit-baseline.py, docs-check.yml's website job",
+      "remediation": "a dedicated Docusaurus major-version migration, tested against theme-mermaid/local-search compatibility, as its own reviewable change",
+      "review_date": "2026-12-12",
+      "issue_url": "https://github.com/mangopep/forgestack/issues/35",
+      "status": "open, tracked, baseline enforced in CI"
+    },
+    {
+      "id": "#36",
+      "title": "Verify F2 documentation site mobile layout in a real browser",
+      "severity_breakdown": null,
+      "affected_component": "website/ (Docusaurus site layout)",
+      "fixed_version": null,
+      "exploitability_context": "not applicable -- this is a layout/UX verification task, not a security finding",
+      "environment": "documentation site",
+      "owner": "mangopep",
+      "evidence": "N/A",
+      "remediation": "manual verification in a real mobile browser",
+      "review_date": null,
+      "issue_url": "https://github.com/mangopep/forgestack/issues/36",
+      "status": "open, explicitly out of scope for F4 (not a security finding -- see F4's own instruction)"
+    },
+    {
+      "id": "#40",
+      "title": "98 Python base-image OS-package CVEs excluded by Trivy ignore-unfixed",
+      "severity_breakdown": { "critical": 2, "high": 96 },
+      "affected_component": "apps/python-api's runtime image base, python:3.12-slim-bookworm (krb5, util-linux, sqlite3, systemd libs, zlib1g, gzip, perl-base, ncurses)",
+      "fixed_version": "none available -- every suppressed finding's Trivy 'Fixed Version' column was empty at assessment time (status affected/will_not_fix/fix_deferred)",
+      "exploitability_context": "OS packages present in the image but not invoked by this service's code path (no kadmind/KDC, no sqlite usage, no mount operations); mitigated further by non-root execution, read-only filesystem, and all Linux capabilities dropped (F4 hardening)",
+      "environment": "apps/python-api container runtime image",
+      "owner": "mangopep",
+      "evidence": "unfiltered Trivy scan preserved in docs/architecture/SUPPLY-CHAIN-SECURITY.md and reproducible via `trivy image --severity HIGH,CRITICAL <image>` (no ignore-unfixed) against a freshly built image; filtered (0-finding) evidence from the passing CI run referenced in the original PR",
+      "remediation": "move to a 3.11-compatible distroless Python base or an Alpine/musl rebuild with a build toolchain for the Rust/C-extension dependencies (pydantic_core, uvloop, httptools, watchfiles) -- both rejected in F3 as materially bigger changes than the finding warranted at the time; revisit if a Debian point release ships fixes, or at the next scheduled review",
+      "review_date": "2027-02-13",
+      "issue_url": "https://github.com/mangopep/forgestack/issues/40",
+      "status": "open, tracked, exception enforced in CI via ignore-unfixed; VEX statements generated per-CVE by cmd/secreport (status: affected, not not_affected -- no per-CVE reachability analysis was done for all 98 individually)"
+    }
+  ]
+}
