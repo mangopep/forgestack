@@ -112,6 +112,34 @@ folder/file structure... for... accidental complexity" is meant to catch, and be
 configuration field that's validated but never read is worse than no field at all — it
 implies a guarantee the code doesn't keep.
 
+## Decision: `ignore-unfixed` for the Python image's Trivy scan, not a base-image swap
+
+The first PR run of `python-container` failed Trivy with 98 HIGH/CRITICAL findings, all in
+`python:3.12-slim-bookworm`'s own Debian OS packages (krb5, util-linux, sqlite3, systemd
+libs, zlib1g, etc.) — none in the application's Python dependencies (`pip-audit` against
+the same image's lockfile: zero findings, both locally and in CI). Every one of the 98
+rows had an empty "Fixed Version" column (status `affected`/`will_not_fix`/`fix_deferred`)
+— Debian has not shipped a patch for any of them yet, so no version bump fixes this.
+
+Investigated the obvious alternative first: the Go image uses
+`gcr.io/distroless/static-debian12:nonroot` and has zero Trivy findings, so swapping the
+Python image to `gcr.io/distroless/python3-debian12` looked like the matching fix. Rejected
+after testing: that image ships Python **3.11.2**, while this service's lockfile pins
+C-extension wheels compiled for **cp312** (`pydantic_core`, `uvloop`, `httptools`,
+`watchfiles`) — those fail to import under 3.11. Making distroless work would mean
+downgrading the whole service to 3.11 (cascading into `pyproject.toml`, the lockfile, and
+CI) or rebuilding on Alpine/musl from source (no compiler in a minimal runtime image,
+risky for the Rust-backed packages) — both are a materially bigger, riskier change than
+"the container scan is noisy."
+
+Used `ignore-unfixed: true` on the `aquasecurity/trivy-action` step instead: verified
+locally (`trivy image --ignore-unfixed --severity HIGH,CRITICAL`, exit code 0, zero
+remaining findings) that it suppresses exactly the 98 unfixable rows and nothing else —
+a vulnerability Debian *has* patched still fails the build. This is the standard, narrow
+mitigation for "the base image has pending-upstream-fix OS CVEs," not a severity-threshold
+weakening: `severity: HIGH,CRITICAL` is unchanged, and `python-container` is not a
+required/branch-protection status check (see above), so no required gate was touched.
+
 ## Deferred, explicitly, per F3's own scope
 
 Authentication, a real (non-in-memory) datastore, message brokers, Kubernetes, an AI
