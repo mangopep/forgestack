@@ -1,0 +1,42 @@
+[project]
+name = "forgestack-python-api"
+version = "0.1.0"
+description = "ForgeStack Python reference service -- FastAPI, typed schemas, same operational contracts as the Go API (see docs/platform/CONTRACTS.md)."
+requires-python = ">=3.11"
+dependencies = [
+    # fastapi pinned to the lowest version whose required starlette range
+    # (>=0.46.0) excludes the vulnerable 0.49.3 we started on -- found via
+    # `pip-audit` during F3 hardening (PYSEC-2026-161/248/249/2280/2281).
+    # fastapi<0.162.5 all require starlette<0.50.0, which has no non-
+    # vulnerable release in that range; only crossing into starlette 1.x
+    # (and therefore a newer fastapi) fixes it. Verified compatible: full
+    # test suite, ruff, and mypy --strict all still pass unchanged.
+    "fastapi==0.162.5",
+    "uvicorn[standard]==0.54.0",
+    "pydantic==2.14.3",
+    "pydantic-settings==2.16.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    # pytest pinned to the fix version for PYSEC-2026-1845 (pytest<9.0.3).
+    "pytest==9.0.3",
+    "httpx==0.28.1",
+    "ruff==0.8.6",
+    "mypy==1.14.1",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

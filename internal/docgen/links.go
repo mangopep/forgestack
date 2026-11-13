@@ -30,6 +30,11 @@ var skippedDirs = map[string]bool{
 	"build":         true,
 	".docusaurus":   true,
 	".cache-loader": true,
+	".venv":         true, // Python virtual environments (e.g. apps/python-api/.venv)
+	"venv":          true,
+	".pytest_cache": true,
+	".mypy_cache":   true,
+	".ruff_cache":   true,
 }
 
 // CheckLinks walks every .md file under root (skipping skippedDirs) and
