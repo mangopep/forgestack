@@ -15,7 +15,7 @@
       "remediation": "a dedicated Docusaurus major-version migration, tested against theme-mermaid/local-search compatibility, as its own reviewable change",
       "review_date": "2026-12-12",
       "issue_url": "https://github.com/mangopep/forgestack/issues/35",
-      "status": "open, tracked, baseline enforced in CI"
+      "status": "closed 2026-11-13 (GitHub issue closed by maintainer, stateReason COMPLETED; no linked PR). The technical control remains live and enforced in CI regardless of issue-tracker state: website/.security/npm-audit-baseline.json still gates on this exact baseline."
     },
     {
       "id": "#36",
@@ -30,7 +30,7 @@
       "remediation": "manual verification in a real mobile browser",
       "review_date": null,
       "issue_url": "https://github.com/mangopep/forgestack/issues/36",
-      "status": "open, explicitly out of scope for F4 (not a security finding -- see F4's own instruction)"
+      "status": "closed 2026-11-13 (GitHub issue closed by maintainer, stateReason COMPLETED). Not a security finding either way -- out of scope for F4 regardless of tracker state."
     },
     {
       "id": "#40",
@@ -45,7 +45,7 @@
       "remediation": "move to a 3.11-compatible distroless Python base or an Alpine/musl rebuild with a build toolchain for the Rust/C-extension dependencies (pydantic_core, uvloop, httptools, watchfiles) -- both rejected in F3 as materially bigger changes than the finding warranted at the time; revisit if a Debian point release ships fixes, or at the next scheduled review",
       "review_date": "2027-02-13",
       "issue_url": "https://github.com/mangopep/forgestack/issues/40",
-      "status": "open, tracked, exception enforced in CI via ignore-unfixed; VEX statements generated per-CVE by cmd/secreport (status: affected, not not_affected -- no per-CVE reachability analysis was done for all 98 individually)"
+      "status": "closed 2026-11-13 (GitHub issue closed by maintainer, stateReason COMPLETED; no linked PR). The technical control remains live and enforced in CI regardless of issue-tracker state: Trivy's ignore-unfixed exception on apps/python-api's base image is still in force. VEX statements generated per-CVE by cmd/secreport (status: affected, not not_affected -- no per-CVE reachability analysis was done for all 98 individually)."
     }
   ]
 }

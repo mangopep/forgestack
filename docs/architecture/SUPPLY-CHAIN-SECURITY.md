@@ -179,6 +179,23 @@ Per F4's own instruction not to build more than current needs justify:
 - **SaaSBOM**: this is not a SaaS product; not applicable today.
 - **AI/ML-BOM**: no AI/ML models are shipped by this codebase; not applicable today.
 
+## Future AI/ML security and governance
+
+This codebase ships no AI/ML models today, so AI/ML-specific supply-chain controls (model
+provenance, training-data lineage, an AI/ML-BOM) are not yet applicable — listed above, not
+built. What *does* already apply, today, is governance of the **AI-assisted engineering
+process** itself: this repository's own development sessions use Claude Code, governed by
+`CLAUDE.md`'s working protocol (explicit approval gates for irreversible/security-sensitive
+actions, mandatory audit-before-implement, evidence labeling) and `.claude/hooks/guard.py`'s
+deny-list for obviously dangerous commands. This is **not** a certified AI management system
+and is not claimed as one — see the ISO/IEC 42001 row in the compliance table above, which
+records this honestly as an unassessed mapping candidate, not a compliance claim.
+
+If a real AI/ML feature ships from this codebase in the future (e.g. the `21` curriculum
+module's "AWS Bedrock, RAG, embeddings" work in `docs/ROADMAP.md`), that would be the trigger
+to revisit AI/ML-BOM and model-provenance tooling as its own reviewable addition — not
+something to build speculatively now.
+
 ## Local scanning and report-generation commands
 
 See `docs/security/VULNERABILITY-LIFECYCLE.md`'s "Local reproduction" section — not

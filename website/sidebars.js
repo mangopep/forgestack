@@ -89,6 +89,7 @@ const sidebars = {
         'architecture/SECURITY-TRUST-BOUNDARIES',
         'architecture/SUPPLY-CHAIN-SECURITY',
         'security/VULNERABILITY-LIFECYCLE',
+        'security/CONTROL-EVIDENCE-REGISTRY',
         'SECURITY-AUDIT',
         'AUTOMATED-CODE-REVIEW',
       ],
