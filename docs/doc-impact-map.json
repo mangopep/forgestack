@@ -179,6 +179,30 @@
       "area": "Security and supply-chain documentation",
       "doc_path": "docs/security/",
       "kind": "manual"
+    },
+    {
+      "pattern": "templates/**",
+      "area": "Reusable service templates",
+      "doc_path": "docs/VERSIONING.md",
+      "kind": "manual"
+    },
+    {
+      "pattern": "scripts/new-service.sh",
+      "area": "Reusable service templates",
+      "doc_path": "docs/VERSIONING.md",
+      "kind": "manual"
+    },
+    {
+      "pattern": "internal/semver/**/*.go",
+      "area": "Versioning and compatibility",
+      "doc_path": "docs/VERSIONING.md",
+      "kind": "manual"
+    },
+    {
+      "pattern": ".github/workflows/release.yml",
+      "area": "Trusted releases",
+      "doc_path": "docs/RELEASES.md",
+      "kind": "manual"
     }
   ]
 }

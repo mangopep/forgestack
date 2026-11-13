@@ -49,7 +49,10 @@ This is explicitly optional and phased, not a new always-on service:
   `docs/architecture/SUPPLY-CHAIN-SECURITY.md`), explicitly marked as evidence, not
   certification. Automated collection today covers CI scan results, SBOMs, and
   signed-artifact evidence only.
-- **F5-F10 (future, not started)**: expand automated collection to infrastructure
+- **Future, unscheduled against a specific F-number (not started)** — originally
+  sketched as "F5-F10" before F5 was assigned to templates/versioning/releases instead
+  (see `docs/adr/0006-f5-templates-releases.md`); renumber when this work is actually
+  scheduled rather than guess a number now: expand automated collection to infrastructure
   state, access reviews, incident records, backup/recovery verification, and
   security test results — each one a separate, reviewable change, not a single
   rewrite. Add reviewer comments, remediation tasks, and evidence-request tracking
