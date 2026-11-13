@@ -1,0 +1,14 @@
+{
+  "_comment": "Tracked, pre-existing npm audit findings in build/dev-tooling dependencies, confirmed in issue #35. None of these packages ship in website/build/ (the deployed static site) -- see #35 for the full investigation (npm audit fix requires --force, suggested fix is a Docusaurus DOWNGRADE, not applied). This file is a known-findings baseline, not a suppression: CI always runs the full audit and fails if NEW findings appear beyond this baseline, or if this baseline itself goes stale (see review_by).",
+  "issue": "https://github.com/mangopep/forgestack/issues/35",
+  "recorded_date": "2026-11-12",
+  "review_by": "2026-12-12",
+  "baseline_counts": {
+    "critical": 16,
+    "high": 1,
+    "moderate": 6,
+    "low": 3,
+    "info": 0,
+    "total": 26
+  }
+}

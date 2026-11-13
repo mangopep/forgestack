@@ -9,6 +9,12 @@ permissions:
   contents: read
   security-events: write
 jobs:
+  # Unchanged: this is the required status check ("analyze") in all three
+  # branch rulesets (main/staging/develop). F4 adds language coverage via
+  # NEW sibling jobs below instead of a languages: matrix on this job --
+  # a matrix would rename this check to "analyze (go)", which is a
+  # required-status-check rename requiring separate governance approval
+  # (see docs/adr/0005-f4-security-supply-chain.md).
   analyze:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -23,4 +29,32 @@ jobs:
         with:
           go-version: '1.27.4'
       - run: go build ./...
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+  # New in F4: Python coverage for apps/python-api. Advisory (not a required
+  # check) until separately promoted to the ruleset -- see ADR 0005.
+  analyze-python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: python
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+  # New in F4: JavaScript/TypeScript coverage for the Docusaurus website
+  # (build-time tooling, not the deployed static output -- see issue #35
+  # and docs/security/VULNERABILITY-LIFECYCLE.md). Advisory, same reasoning
+  # as analyze-python.
+  analyze-javascript:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: javascript-typescript
       - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3

@@ -51,6 +51,24 @@ jobs:
             cat /tmp/changed.err >&2
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           fi
+      - name: Dockerfile lint (hadolint)
+        if: steps.changed.outputs.relevant == 'true'
+        uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
+        with:
+          dockerfile: Dockerfile
+          # warning (not the tool's default "info"): fails on real issues,
+          # not DL3066 (info: non-numeric USER "nonroot") — intentional,
+          # matching gcr.io/distroless/static-debian12:nonroot's own
+          # convention, not an oversight.
+          failure-threshold: warning
+      - name: Dockerfile misconfiguration scan (Trivy config)
+        if: steps.changed.outputs.relevant == 'true'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: Dockerfile
+          exit-code: '1'
+          severity: HIGH,CRITICAL
       - name: Build image locally (not pushed to any registry)
         if: steps.changed.outputs.relevant == 'true'
         run: docker build -t forgestack:ci-scan .
