@@ -19,6 +19,24 @@
       "kind": "generated"
     },
     {
+      "pattern": "apps/python-api/**/*.py",
+      "area": "Python reference service",
+      "doc_path": "apps/python-api/README.md",
+      "kind": "manual"
+    },
+    {
+      "pattern": "apps/python-api/**",
+      "area": "Cross-language service contract",
+      "doc_path": "docs/platform/CONTRACTS.md",
+      "kind": "manual"
+    },
+    {
+      "pattern": "internal/platform/middleware/**/*.go",
+      "area": "Cross-language service contract",
+      "doc_path": "docs/platform/CONTRACTS.md",
+      "kind": "manual"
+    },
+    {
       "pattern": "cmd/**/*.go",
       "area": "Environment variable reference",
       "doc_path": "docs/generated/CONFIG.md",

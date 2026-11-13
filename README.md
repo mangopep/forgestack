@@ -114,7 +114,9 @@ memory. The Compose ports are bound to `127.0.0.1` deliberately.
 
 ## Repository layout
 
-- `cmd/api`, `internal/api`: Go application and tests
+- `cmd/api`, `internal/modules/posts`, `internal/platform`: Go reference service (go-kit layered) and tests
+- `apps/python-api`: Python (FastAPI) reference service — see `docs/platform/CONTRACTS.md`
+  for what it shares with the Go service and `apps/python-api/README.md` to run it
 - `cmd/docgen`: generates `docs/generated/*` directly from source; CI fails if these drift
 - `databases/postgres`: SQL lab schema
 - `compose.yaml`, `Dockerfile`: local containers

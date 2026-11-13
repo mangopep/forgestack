@@ -2,9 +2,10 @@
 
 ## Supported scope
 
-ForgeStack is a learning/lab repository. The Go API and tooling in this repo are not intended
-for production use or for handling real user data as-is. Security reports are still welcome and
-taken seriously for the code, CI workflows, and Terraform sandbox in this repository.
+ForgeStack is a learning/lab repository. The Go and Python reference services and tooling in
+this repo are not intended for production use or for handling real user data as-is. Security
+reports are still welcome and taken seriously for the code, CI workflows, and Terraform sandbox
+in this repository.
 
 ## Reporting a vulnerability
 
