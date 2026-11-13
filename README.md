@@ -109,7 +109,9 @@ projects from both templates. `--validate` builds and tests the generated projec
 place before you touch it. See [`docs/VERSIONING.md`](docs/VERSIONING.md) for template
 versioning, compatibility, and upgrade policy, and
 [`docs/RELEASES.md`](docs/RELEASES.md) for how ForgeStack's own trusted-release pipeline
-reuses the same SBOM/signing tooling (not yet exercised on a live tag push).
+reuses the same SBOM/signing tooling — live-exercised on `main`, with a verified
+successful release (`v0.1.2`, after two earlier real failures were diagnosed and fixed;
+see `docs/RELEASES.md` for the full history of all three attempts).
 
 ## Quick start
 
@@ -143,7 +145,7 @@ See [`docs/COMMANDS.md`](docs/COMMANDS.md) for every command this repository use
 | F2 | Documentation-as-code (this Docusaurus site, generated references, link/diagram validation) | **Implemented**, live on GitHub Pages (`docs/adr/0003-documentation-as-code.md`) |
 | F3 | Go + Python application foundation, shared service contract | **Implemented**, live on `main` (`docs/adr/0004-f3-application-foundation.md`) |
 | F4 | Security & supply-chain foundation (this document's table above) | **Implemented and live on `main`**, including a verified live run of keyless signing + GitHub-native attestation (`docs/adr/0005-f4-security-supply-chain.md`) |
-| F5 | Reusable Go/Python templates, SemVer policy, trusted-release pipeline | **Implemented locally**, not yet pushed; release pipeline verified with local fixtures only, not a live tag push (`docs/adr/0006-f5-templates-releases.md`) |
+| F5 | Reusable Go/Python templates, SemVer policy, trusted-release pipeline | **Implemented and live on `main`**, including a verified successful live release (`v0.1.2`) — signed, attested, SBOM'd, and published as a GitHub Release. Two earlier live attempts (`v0.1.0`, `v0.1.1`) failed and were fixed first; see `docs/RELEASES.md` for the full history (`docs/adr/0006-f5-templates-releases.md`) |
 | F6–F20 | Future phases (not yet scoped in detail; see `docs/ROADMAP.md`) | **Not started** |
 | Audit & Trust module | Evidence-collection expansion (infra/access/incident/backup), later a customer-facing Trust Center | **Roadmap only**, unscheduled against a specific F-number — see `docs/ROADMAP.md`'s "Audit & Trust" module |
 
@@ -169,8 +171,8 @@ scope, issuance/expiry dates) — never granted by this repository's own tooling
 - `website/`: Docusaurus site that publishes `docs/` to GitHub Pages
 - `.github/workflows`: CI, lint, SAST, secret/container/IaC scanning, SBOM generation,
   signing/attestation, weekly deep security rescan, docs-check, Pages deploy, and a
-  tag-gated trusted-release pipeline (`release.yml`, not yet exercised) — no cloud
-  auto-deploy anywhere
+  tag-gated trusted-release pipeline (`release.yml`, live-exercised — see `docs/RELEASES.md`
+  for the `v0.1.0`/`v0.1.1`/`v0.1.2` history) — no cloud auto-deploy anywhere
 - `docs/security/`: vulnerability lifecycle, findings register
 - `docs/architecture/`: trust boundaries, supply-chain security, application architecture
 - `docs/adr/`: every accepted architecture decision, with the tradeoffs considered
