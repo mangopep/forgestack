@@ -55,6 +55,28 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Dockerfile lint (hadolint)
+        uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
+        with:
+          dockerfile: apps/python-api/Dockerfile
+          failure-threshold: warning
+          # DL3025 (use JSON-array ENTRYPOINT): deliberately NOT applied.
+          # This Dockerfile's shell-form ENTRYPOINT is required for ${PORT}
+          # expansion — exec-form cannot perform environment-variable
+          # substitution, and switching to it was a real bug caught and
+          # fixed during F3 (see docs/adr/0004-f3-application-foundation.md,
+          # "a real config/Docker bug caught and fixed, not shipped").
+          # DL3066 (info: non-numeric USER "appuser") is below the
+          # failure-threshold and not ignored explicitly — informational,
+          # not actioned (see docs/adr/0005-f4-security-supply-chain.md).
+          ignore: DL3025
+      - name: Dockerfile misconfiguration scan (Trivy config)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: apps/python-api/Dockerfile
+          exit-code: '1'
+          severity: HIGH,CRITICAL
       - name: Build image locally (not pushed to any registry)
         run: docker build -t forgestack-python-api:ci-scan apps/python-api
       - name: Scan built image for known vulnerabilities

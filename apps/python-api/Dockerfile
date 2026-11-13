@@ -4,12 +4,14 @@
 # well-tested image tag; the service itself only requires Python >=3.11
 # (see pyproject.toml), so this is a safe, portable choice, not a
 # compatibility gap.
-FROM python:3.12-slim-bookworm AS builder
+# Pinned by digest, not just tag (F4 supply-chain hardening) -- see
+# docs/adr/0005-f4-security-supply-chain.md for the update procedure.
+FROM python:3.12-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df AS builder
 WORKDIR /src
 COPY requirements-lock.txt .
 RUN pip install --no-cache-dir --no-compile -r requirements-lock.txt
 
-FROM python:3.12-slim-bookworm
+FROM python:3.12-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df
 RUN useradd --create-home --uid 1000 appuser
 WORKDIR /app
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
