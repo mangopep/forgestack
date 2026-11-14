@@ -9,7 +9,7 @@ installed (`go version` should print `1.27.4` or compatible).
 | `go-quality` | `ci.yml` | `gofmt`, `go vet`, `golangci-lint`, `go test -race`, `go build ./cmd/api` |
 | `security-baseline` | `ci.yml` | `scripts/review_guard.py`, `govulncheck` |
 | `analyze` | `codeql.yml` | CodeQL static analysis (Go) |
-| `gitleaks` | `secret-scan.yml` | Committed-secret scanning across full history |
+| `gitleaks` | `secret-scan.yml` | Committed-secret scanning of this PR's commits (or this push's commits on `main`/`staging`/`develop`) — not the whole repository history; see `docs/security/VULNERABILITY-LIFECYCLE.md` for the distinction and how to run a real full-history scan on demand |
 | `trivy-image` | `container-scan.yml` | Built container image vulnerability scan (HIGH/CRITICAL) |
 | `validate` | `terraform-checks.yml` | Terraform `fmt`/`validate` + Trivy IaC config scan |
 | `docs` | `docs-check.yml` | Generated docs freshness, broken relative links, doc-impact report |

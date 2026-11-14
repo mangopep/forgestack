@@ -1,14 +1,14 @@
 {
-  "_comment": "Tracked, pre-existing npm audit findings in build/dev-tooling dependencies, confirmed in issue #35. None of these packages ship in website/build/ (the deployed static site) -- see #35 for the full investigation (npm audit fix requires --force, suggested fix is a Docusaurus DOWNGRADE, not applied). This file is a known-findings baseline, not a suppression: CI always runs the full audit and fails if NEW findings appear beyond this baseline, or if this baseline itself goes stale (see review_by).",
+  "_comment": "Tracked, pre-existing npm audit findings in build/dev-tooling dependencies, confirmed in issue #35. None of these packages ship in website/build/ (the deployed static site) -- see #35 for the full investigation. 2026-11-13/14: targeted package.json `overrides` for tinypool, serialize-javascript, and uuid (verified compatible: npm install + docusaurus build + link check all still pass) eliminated every critical/high/moderate finding (26 -> 5), leaving only the deepmerge/@svgr/plugin-svgo/@svgr/webpack/@docusaurus/plugin-svgr/@docusaurus/preset-classic chain, which has no fix: deepmerge's only patched behavior requires a version that does not exist (its vulnerable range >=4.2.0 covers every published release including the latest, 4.3.1 -- confirmed via `npm view deepmerge versions`), and npm's only suggested fix for the rest of the chain is `--force`-installing an OLDER @docusaurus/preset-classic (3.6.3, a downgrade from the pinned 3.10.2, isSemVerMajor: true) -- rejected for the same reason as the original investigation: not a safe/compatible fix. This file is a known-findings baseline, not a suppression: CI always runs the full audit and fails if NEW findings appear beyond this baseline, or if this baseline itself goes stale (see review_by).",
   "issue": "https://github.com/mangopep/forgestack/issues/35",
-  "recorded_date": "2026-11-12",
-  "review_by": "2026-12-12",
+  "recorded_date": "2026-11-14",
+  "review_by": "2027-02-14",
   "baseline_counts": {
-    "critical": 16,
-    "high": 1,
-    "moderate": 6,
-    "low": 3,
+    "critical": 0,
+    "high": 0,
+    "moderate": 0,
+    "low": 5,
     "info": 0,
-    "total": 26
+    "total": 5
   }
 }
