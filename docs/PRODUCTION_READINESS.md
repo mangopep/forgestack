@@ -55,7 +55,7 @@ PRs #1, #2, #3, #5, #6 are merged. PR #4 (`hashicorp/setup-terraform` 3.1.2→4.
 | SAST | CodeQL only — **no Semgrep**, despite being requested. Semgrep adds different rule coverage (OWASP-style custom rules) CodeQL doesn't cover well for small Go services. |
 | Filesystem/dependency scanning via Trivy | Trivy currently used for container image + Terraform config only. **Not run in filesystem mode against the repo itself** (would catch, e.g., vulnerable vendored files or misconfigured Dockerfiles beyond what's scanned now). |
 | Metrics | `/metrics-demo` is a fake counter explicitly labeled "demo"; **not Prometheus-format, not real metrics**. |
-| Secret detection | Two baseline layers exist, but narrow. No scanning of git *history* (gitleaks is configured with `fetch-depth: 0` so it does scan history — this is actually covered, correcting an undersell). |
+| Secret detection | Two baseline layers exist, but narrow, and this entry was wrong: `fetch-depth: 0` only makes full history *available* to the checkout, it does not make `gitleaks-action` *scan* it — confirmed from a live PR run (`secret-scan.yml`'s `gitleaks` step reported scanning only that PR's commits, not the repository's full history). A real full-history scan exists, but it's local/on-demand, not automatic on every PR — see `docs/security/VULNERABILITY-LIFECYCLE.md`. |
 
 ## 4. Missing entirely (confirmed from code — absent)
 

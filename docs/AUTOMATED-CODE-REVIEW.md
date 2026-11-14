@@ -15,8 +15,10 @@ which are informational only.
 4. `github/codeql-action`: security static analysis; availability and permissions depend on
    repository visibility and GitHub plan.
 5. `scripts/review_guard.py`: explicit baseline secret and tracked-file checks.
-6. `gitleaks`: broader secret scanning (full git history, not just the baseline script's
-   narrow AWS-key/PEM patterns).
+6. `gitleaks`: broader secret scanning than the baseline script's narrow AWS-key/PEM
+   patterns — but on a PR, it scans that PR's commits only, not the repository's full git
+   history (confirmed from a live run); a real full-history scan runs locally/on demand, see
+   `docs/security/VULNERABILITY-LIFECYCLE.md`.
 7. Terraform `fmt`, `validate`, Trivy IaC scanning: blocks high/critical infrastructure
    misconfigurations. Trivy also scans the built container image.
 8. Dependabot: dependency and GitHub Action update PRs.

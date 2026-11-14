@@ -140,6 +140,30 @@ mitigation for "the base image has pending-upstream-fix OS CVEs," not a severity
 weakening: `severity: HIGH,CRITICAL` is unchanged, and `python-container` is not a
 required/branch-protection status check (see above), so no required gate was touched.
 
+**Update, 2026-11-14 (issue #40):** the "no base-image swap" decision above was
+specifically about leaving the Debian family entirely (distroless/Alpine) — re-evaluated
+later and found correctly rejected for the reasons given. A narrower swap *within* the
+same official, glibc-based Debian "slim" family was not evaluated at the time and turned
+out to be viable: `python:3.12-slim-bookworm` → `python:3.12-slim-trixie` (a newer Debian
+release), verified compatible first (full test suite, `ruff`, `mypy`, a real build/run,
+`/healthz` all pass unchanged), reduced the finding count from 98 (2 critical) to 47 (0
+critical), plus a one-line `apt-get install --only-upgrade zlib1g` for the two findings
+that had an in-release point fix. `ignore-unfixed` is still in force for the 47 that
+remain — see issue #40 and `docs/security/findings-register.json` for the current count.
+
+**Second update, same day (2026-11-14):** the line above calling Alpine "correctly
+rejected for the reasons given" did not hold up to actually re-testing it, rather than
+re-reasoning about it. The original rejection's premise — no musllinux wheels existed for
+`pydantic_core`/`uvloop`/`httptools`/`watchfiles` — was true when F3 made that call, but a
+real `pip install -r requirements-lock.txt` against `python:3.12-alpine` now succeeds in
+seconds with prebuilt wheels for all four, no compiler needed. Full test suite (11/11),
+`/healthz`, and an unfiltered Trivy scan all confirmed compatible before switching for
+real — the image now carries **0 HIGH/CRITICAL findings** (down from 47), is smaller
+(159MB vs. 384MB), and no longer needs `ignore-unfixed` at all. This supersedes the
+trixie step above, not the general lesson: re-evaluating a prior rejection by actually
+testing it again, on a cadence, is exactly what caught this — assuming it still holds
+would not have.
+
 ## Deferred, explicitly, per F3's own scope
 
 Authentication, a real (non-in-memory) datastore, message brokers, Kubernetes, an AI
