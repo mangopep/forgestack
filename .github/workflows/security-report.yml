@@ -64,6 +64,14 @@ jobs:
           docker build -t forgestack:report-scan .
           docker build -t forgestack-python-api:report-scan apps/python-api
       - name: Scan Go image
+        # No `severity:` filter -- this step's own name and the Python
+        # step's comment below both already claimed "unfiltered," but
+        # until now a `severity: HIGH,CRITICAL` line quietly contradicted
+        # that: LOW/MEDIUM findings were never actually captured in this
+        # report's evidence, only reasoned about from ad hoc local scans.
+        # exit-code: '0' (never fails the job) is what makes this safe to
+        # run genuinely unfiltered -- LOW/MEDIUM visibility in reporting,
+        # without turning every LOW finding into an unconditional blocker.
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: image
@@ -71,7 +79,6 @@ jobs:
           format: json
           output: trivy-go-image.json
           exit-code: '0'
-          severity: HIGH,CRITICAL
       - name: Scan Python image (unfiltered, no ignore-unfixed — the CI gate's exception does not apply to this report)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -80,7 +87,6 @@ jobs:
           format: json
           output: trivy-python-image.json
           exit-code: '0'
-          severity: HIGH,CRITICAL
       - name: Scan Go Dockerfile
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -89,7 +95,6 @@ jobs:
           format: json
           output: trivy-go-dockerfile.json
           exit-code: '0'
-          severity: HIGH,CRITICAL
       - name: Scan Python Dockerfile
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -98,7 +103,6 @@ jobs:
           format: json
           output: trivy-python-dockerfile.json
           exit-code: '0'
-          severity: HIGH,CRITICAL
 
       - name: Run gitleaks
         # gitleaks/gitleaks-action has no option to export the raw JSON
