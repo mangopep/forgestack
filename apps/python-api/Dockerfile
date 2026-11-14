@@ -19,8 +19,13 @@ FROM python:3.12-slim-trixie@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65
 # Patches the one OS package (zlib1g) that had an available point-release
 # fix within trixie itself at assessment time (issue #40) -- everything
 # else in the base image's remaining findings has no upstream fix yet.
-# Removes apt's own cache afterward so it isn't shipped in the final layer.
-RUN apt-get update && apt-get install --yes --no-install-recommends --only-upgrade zlib1g \
+# Version pinned (not a bare `--only-upgrade`) to match this repo's own
+# supply-chain pinning convention and hadolint's DL3008 check; re-resolve
+# with `apt-cache policy zlib1g` inside this image if this ever needs
+# bumping again. Removes apt's own cache afterward so it isn't shipped in
+# the final layer.
+RUN apt-get update && apt-get install --yes --no-install-recommends \
+    --only-upgrade zlib1g=1:1.3.dfsg+really1.3.1-1+deb13u1 \
     && rm -rf /var/lib/apt/lists/*
 RUN useradd --create-home --uid 1000 appuser
 WORKDIR /app
