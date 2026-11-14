@@ -14,9 +14,9 @@
 #      python:3.12-alpine with NO compiler needed, full test suite (11/11)
 #      passes, the service runs and /healthz responds. Unfiltered Trivy:
 #      47 HIGH (trixie) -> 0 HIGH/CRITICAL (alpine, after the krb5-libs/
-#      zlib apk upgrades below) -- only 5 MEDIUM/1 LOW remain, from pip's
-#      own package metadata still present in the copied site-packages
-#      (not a runtime dependency; a candidate follow-up, not blocking).
+#      zlib apk upgrades below) -> 0 findings of ANY severity (after also
+#      removing pip's own package metadata, see below) -- confirmed by a
+#      fully unfiltered scan, not just the HIGH/CRITICAL gate.
 #      Image also shrank: 384MB (trixie) -> 159MB (alpine).
 # Pinned by digest, not just tag (F4 supply-chain hardening) -- see
 # docs/adr/0005-f4-security-supply-chain.md for the update procedure.
@@ -51,6 +51,15 @@ COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/pytho
 # unnecessary dependencies" -- issue #40).
 COPY --from=builder /usr/local/bin/uvicorn /usr/local/bin/uvicorn
 COPY app ./app
+# pip ships baked into python:3.12-alpine's own site-packages (confirmed:
+# present even in a bare, untouched base image) and the builder-stage
+# copy above carries it forward too -- it is not a runtime dependency of
+# this service at all. Removed here, after the copy (removing it before
+# would just have it reintroduced by the copy above, since the builder's
+# own site-packages has it too). This is what cleared the last 5
+# MEDIUM/1 LOW findings (all pip's own CVEs) down to zero.
+RUN rm -rf /usr/local/lib/python3.12/site-packages/pip \
+           /usr/local/lib/python3.12/site-packages/pip-*.dist-info
 # VERSION defaults to "docker-build" -- the honest default for an ordinary
 # (non-release) build. release.yml's publish job passes
 # --build-arg VERSION=<tag> so a published image's /healthz actually
