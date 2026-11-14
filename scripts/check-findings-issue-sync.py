@@ -77,19 +77,32 @@ def main() -> int:
             discrepancies.append((entry.get("id"), issue_url, "closed"))
 
     if discrepancies:
-        print(
-            "FAIL: findings-register.json records these as 'open, tracked' (the underlying "
-            "finding is still unresolved) but their linked GitHub issue is closed:",
-            file=sys.stderr,
-        )
-        for finding_id, issue_url, state in discrepancies:
-            print(f"  {finding_id}: {issue_url} -> {state}", file=sys.stderr)
-        print(
-            "Closing a tracking issue does not fix anything. Either reopen the issue with "
-            "evidence (if the finding is genuinely still unresolved), or update "
-            "findings-register.json's status if it has actually been remediated.",
-            file=sys.stderr,
-        )
+        closed = [d for d in discrepancies if d[2] == "closed"]
+        fetch_errors = [d for d in discrepancies if d[2] == "FETCH_ERROR"]
+        if closed:
+            print(
+                "FAIL: findings-register.json records these as 'open, tracked' (the "
+                "underlying finding is still unresolved) but their linked GitHub issue is "
+                "closed:",
+                file=sys.stderr,
+            )
+            for finding_id, issue_url, state in closed:
+                print(f"  {finding_id}: {issue_url} -> {state}", file=sys.stderr)
+            print(
+                "Closing a tracking issue does not fix anything. Either reopen the issue "
+                "with evidence (if the finding is genuinely still unresolved), or update "
+                "findings-register.json's status if it has actually been remediated.",
+                file=sys.stderr,
+            )
+        if fetch_errors:
+            print(
+                "FAIL: could not confirm these 'open, tracked' findings' linked issues are "
+                "actually open -- GitHub access failed, so their real state is unknown, not "
+                "assumed fine:",
+                file=sys.stderr,
+            )
+            for finding_id, issue_url, state in fetch_errors:
+                print(f"  {finding_id}: {issue_url}", file=sys.stderr)
         return 1
 
     print(f"OK: {checked} 'open, tracked' finding(s) checked, all have an open linked issue (or no issue to check).")
