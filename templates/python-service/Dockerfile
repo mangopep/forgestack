@@ -16,8 +16,15 @@ RUN pip install --no-cache-dir --no-compile -r requirements-lock.txt
 
 FROM python:3.12-alpine@sha256:c5ba3deef00c7758561a0f03c26f44f10589263d40e732b8748e0d1f38f6dd89
 # Patches the two OS packages with an available point-release fix at
-# assessment time; re-resolve with `apk list -I <pkg>` inside this image
-# if this ever needs bumping.
+# assessment time. UNLIKE the base image's digest pin above, this is NOT
+# a long-term-stable pin: Alpine's apk repos only ever serve the CURRENT
+# version of a package for a given Alpine release (confirmed: `apk add
+# pkg=<older-version>` fails outright, "unable to select packages" -- no
+# snapshot archive the way Debian has). Once Alpine ships a newer
+# krb5-libs/zlib, THIS EXACT PIN WILL FAIL THE BUILD (not silently
+# drift). When that happens: re-resolve with `apk update && apk search
+# <pkg>` inside a fresh python:3.12-alpine container and bump the
+# version here.
 RUN apk add --no-cache --upgrade krb5-libs=1.22.3-r0 zlib=1.4-r0 \
     && adduser -D -u 1000 appuser
 WORKDIR /app
