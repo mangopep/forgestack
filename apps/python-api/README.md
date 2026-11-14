@@ -6,7 +6,7 @@ deliberately language-idiomatic instead.
 
 ## Requirements
 
-Python >= 3.11 (local dev). The Docker image pins `python:3.12-slim-bookworm`
+Python >= 3.11 (local dev). The Docker image pins `python:3.12-slim-trixie`
 regardless of your local interpreter version.
 
 ## Install
