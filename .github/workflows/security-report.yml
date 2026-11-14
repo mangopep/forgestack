@@ -19,6 +19,7 @@ on:
     - cron: '30 7 * * 1'
 permissions:
   contents: read
+  issues: read # read-only, only used to detect findings-register.json/issue-tracker drift below
 jobs:
   generate-report:
     runs-on: ubuntu-latest
@@ -27,7 +28,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: 0 # gitleaks below scans full history, matching secret-scan.yml
+          fetch-depth: 0 # gitleaks below runs the raw `gitleaks detect` CLI against this
+          # full checkout and scans real git history (confirmed: ~70+ commits on a run
+          # against this repo) -- unlike secret-scan.yml's gitleaks-action job, which on a
+          # PR/push event scans only that PR's/push's commits, not full history (confirmed
+          # from a live run; see docs/security/VULNERABILITY-LIFECYCLE.md). The two jobs are
+          # not equivalent in scope.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.4'
@@ -112,6 +118,22 @@ jobs:
         run: |
           npm ci
           npm audit --json > ../npm-audit.json || true
+
+      - name: "Detect findings-register.json / GitHub issue-tracker drift"
+        # Read-only (issues: read only, declared above -- no write/privileged
+        # scope). Checks that every finding this register still records as
+        # "open, tracked" has an actually-open linked GitHub issue. This
+        # exists because #35 and #40 were both closed on GitHub directly
+        # (no linked remediation PR) while their underlying vulnerabilities
+        # were still present -- twice in one day -- and were only caught by
+        # chance during an unrelated audit, not by any automated check.
+        # Advisory, like the rest of this workflow: a discrepancy here is a
+        # signal to look, not a merge gate (this workflow doesn't trigger on
+        # pull_request at all, so it never needs a privileged token on an
+        # untrusted PR in the first place).
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/check-findings-issue-sync.py docs/security/findings-register.json --token "$GH_TOKEN"
 
       - name: Generate the security report from real evidence (never claims PASS for missing evidence)
         run: |

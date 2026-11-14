@@ -4,18 +4,18 @@
   "entries": [
     {
       "id": "#35",
-      "title": "26 pre-existing npm audit findings in website/ (Docusaurus dev-tooling deps)",
-      "severity_breakdown": { "critical": 16, "high": 1, "moderate": 6, "low": 3 },
-      "affected_component": "website/package-lock.json (tinypool, webpack-dev-server, sockjs, serialize-javascript, copy-webpack-plugin, css-minimizer-webpack-plugin, uuid, @svgr/*, deepmerge)",
-      "fixed_version": "none safe -- npm's own suggested fix is a Docusaurus DOWNGRADE to 3.7.0 (older than the pinned 3.10.2), rejected: not a safe/compatible fix, risks breaking @docusaurus/theme-mermaid and the local-search plugin",
+      "title": "5 remaining npm audit findings (low only) in website/ (Docusaurus dev-tooling deps) -- reduced from 26 on 2026-11-14",
+      "severity_breakdown": { "critical": 0, "high": 0, "moderate": 0, "low": 5 },
+      "affected_component": "website/package-lock.json: deepmerge, @svgr/plugin-svgo, @svgr/webpack, @docusaurus/plugin-svgr, @docusaurus/preset-classic (SVG-handling chain only -- tinypool, webpack-dev-server/sockjs/uuid, serialize-javascript, copy-webpack-plugin, and css-minimizer-webpack-plugin were fixed, see remediation)",
+      "fixed_version": "none safe for the remaining 5 -- deepmerge has no patched release at all (its vulnerable range >=4.2.0 covers every version up to and including the latest, 4.3.1, confirmed via `npm view deepmerge versions`); npm's only suggested fix for the rest of the chain is `--force`-installing an OLDER @docusaurus/preset-classic (3.6.3, a downgrade from the pinned 3.10.2, isSemVerMajor: true), rejected for the same reason as the original investigation",
       "exploitability_context": "build/dev-tooling only (npm start, docusaurus build) -- none of the affected packages ship in website/build/, the deployed static site",
       "environment": "local development and CI build tooling, not the published site",
       "owner": "mangopep",
       "evidence": "website/.security/npm-audit-baseline.json, scripts/check-npm-audit-baseline.py, docs-check.yml's website job",
-      "remediation": "a dedicated Docusaurus major-version migration, tested against theme-mermaid/local-search compatibility, as its own reviewable change",
-      "review_date": "2026-12-12",
+      "remediation": "2026-11-14: fixed 21 of 26 findings (including all 16 critical and the 1 high) via three targeted package.json `overrides` -- tinypool (1.1.1 -> 2.2.0), serialize-javascript (6.0.2 -> 7.1.4), uuid (8.3.2 -> 11.1.1) -- verified compatible (npm install + docusaurus build + link check all pass unchanged, no --force used). The remaining 5 (deepmerge and its dependents, all low severity) have no available fix; next step is a dedicated Docusaurus major-version migration or removing/replacing the @svgr SVG-handling path, as its own reviewable change",
+      "review_date": "2027-02-14",
       "issue_url": "https://github.com/mangopep/forgestack/issues/35",
-      "status": "open, tracked. Closed by the maintainer 2026-11-13 (stateReason COMPLETED, no linked PR), then reopened the same day after re-verification showed the vulnerabilities are still present and unresolved (live CI re-check, PR #45: npm audit still reports exactly 26 findings, matching this entry's severity breakdown exactly). The technical control remains live and enforced in CI regardless of issue-tracker state: website/.security/npm-audit-baseline.json still gates on this exact baseline. This status is not a remediation claim."
+      "status": "open, tracked. Closed and reopened twice on 2026-11-13, each time without a linked remediation PR: first closed ~12:45, reopened ~13:03 after re-verification (live CI re-check, PR #45: 26 findings, matching this entry's then-current severity breakdown); closed again ~18:41, reopened again after a second re-verification (fresh npm audit: still 26 findings, identical breakdown both times). The count above (5, all low) reflects a REAL fix applied 2026-11-14 (see remediation), not a change in issue-tracker state -- website/.security/npm-audit-baseline.json has been updated to this new baseline and still gates on it in CI. This status is not a claim that the remaining 5 are resolved."
     },
     {
       "id": "#36",
@@ -34,18 +34,18 @@
     },
     {
       "id": "#40",
-      "title": "98 Python base-image OS-package CVEs excluded by Trivy ignore-unfixed",
-      "severity_breakdown": { "critical": 2, "high": 96 },
-      "affected_component": "apps/python-api's runtime image base, python:3.12-slim-bookworm (krb5, util-linux, sqlite3, systemd libs, zlib1g, gzip, perl-base, ncurses)",
-      "fixed_version": "none available -- every suppressed finding's Trivy 'Fixed Version' column was empty at assessment time (status affected/will_not_fix/fix_deferred)",
+      "title": "47 Python base-image OS-package CVEs excluded by Trivy ignore-unfixed -- reduced from 98 on 2026-11-14",
+      "severity_breakdown": { "critical": 0, "high": 47 },
+      "affected_component": "apps/python-api's runtime image base, python:3.12-slim-trixie (util-linux/mount/login, libsqlite3-0, libsystemd0/libudev1, perl-base, ncurses, libuuid1/libblkid1/libmount1/bsdutils/libsmartcols1 -- all part of util-linux's own dependency cluster) -- moved from python:3.12-slim-bookworm 2026-11-14",
+      "fixed_version": "none available for the remaining 47 -- every remaining finding's Trivy 'Fixed Version' column is empty (status affected/will_not_fix/fix_deferred). zlib1g (2 of the original 98) did have a fix within the same Debian release and has been applied (see remediation)",
       "exploitability_context": "OS packages present in the image but not invoked by this service's code path (no kadmind/KDC, no sqlite usage, no mount operations); mitigated further by non-root execution, read-only filesystem, and all Linux capabilities dropped (F4 hardening)",
       "environment": "apps/python-api container runtime image",
       "owner": "mangopep",
       "evidence": "unfiltered Trivy scan preserved in docs/architecture/SUPPLY-CHAIN-SECURITY.md and reproducible via `trivy image --severity HIGH,CRITICAL <image>` (no ignore-unfixed) against a freshly built image; filtered (0-finding) evidence from the passing CI run referenced in the original PR",
-      "remediation": "move to a 3.11-compatible distroless Python base or an Alpine/musl rebuild with a build toolchain for the Rust/C-extension dependencies (pydantic_core, uvloop, httptools, watchfiles) -- both rejected in F3 as materially bigger changes than the finding warranted at the time; revisit if a Debian point release ships fixes, or at the next scheduled review",
+      "remediation": "2026-11-14: moved the base image from python:3.12-slim-bookworm to python:3.12-slim-trixie (a newer Debian release in the same official glibc-based slim family -- verified compatible first: full test suite, ruff, mypy, a real build/run, /healthz all pass unchanged), reducing 98 findings (2 critical) to 49 (0 critical); added `apt-get install --only-upgrade zlib1g` for the 2 findings that had an in-release point fix, reducing to 47. The distroless/Alpine rejection from F3 (docs/adr/0004-f3-application-foundation.md) was about leaving the Debian family entirely and still stands -- this was a narrower, same-family swap not evaluated at the time. Next step, if any: revisit at the scheduled review or if a further Debian point release/base-image change becomes available",
       "review_date": "2027-02-13",
       "issue_url": "https://github.com/mangopep/forgestack/issues/40",
-      "status": "open, tracked. Closed by the maintainer 2026-11-13 (stateReason COMPLETED, no linked PR), then reopened the same day after re-verification showed the vulnerabilities are still present and unresolved (unfiltered Trivy re-scan this session: still all 98 HIGH/CRITICAL findings, no Debian fix available for any). The technical control remains live and enforced in CI regardless of issue-tracker state: Trivy's ignore-unfixed exception on apps/python-api's base image is still in force. VEX statements generated per-CVE by cmd/secreport (status: affected, not not_affected -- no per-CVE reachability analysis was done for all 98 individually). This status is not a remediation claim."
+      "status": "open, tracked. Closed and reopened twice on 2026-11-13, each time without a linked remediation PR: first closed ~12:45, reopened ~13:03 after re-verification (unfiltered Trivy re-scan: 98 findings, matching this entry's then-current severity breakdown); closed again ~18:41, reopened again after a second re-verification (fresh unfiltered Trivy scan: still 98 findings, identical breakdown both times). The count above (47, 0 critical) reflects a REAL fix applied 2026-11-14 (see remediation), not a change in issue-tracker state -- Trivy's ignore-unfixed exception is still in force for what remains. VEX statements generated per-CVE by cmd/secreport (status: affected, not not_affected -- no per-CVE reachability analysis was done for all 47 individually). This status is not a claim that the remaining 47 are resolved."
     }
   ]
 }
