@@ -67,4 +67,9 @@ jobs:
           image-ref: __SERVICE_NAME__:ci-scan
           exit-code: '1'
           severity: HIGH,CRITICAL
-          ignore-unfixed: 'true'
+          # No ignore-unfixed exception: python:3.12-alpine (see
+          # Dockerfile) carries zero HIGH/CRITICAL findings at generation
+          # time, confirmed by an unfiltered scan. If a future scan finds
+          # one, this gate should fail loudly rather than silently pass --
+          # don't add a blanket ignore-unfixed as a reflex if that happens;
+          # fix it or scope a real, dated exception first.

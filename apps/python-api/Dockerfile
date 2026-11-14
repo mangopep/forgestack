@@ -1,37 +1,65 @@
 # Multi-stage build: a build stage with pip, a minimal runtime stage
-# without it. python:3.12-slim-trixie is pinned (not 3.14, which matches
-# some developers' local Python) deliberately -- it is the widely-available,
-# well-tested image tag; the service itself only requires Python >=3.11
-# (see pyproject.toml), so this is a safe, portable choice, not a
-# compatibility gap. Moved from bookworm to trixie (2026-11-14, issue #40):
-# a newer Debian release with a smaller set of outstanding OS-package CVEs
-# in the same official, glibc-based "slim" family -- verified compatible
-# (full test suite, ruff, mypy, a real build/run, and /healthz all still
-# pass unchanged) before switching, not assumed.
+# without it. python:3.12-alpine (not slim-bookworm/-trixie, not 3.14,
+# which matches some developers' local Python) -- the service only
+# requires Python >=3.11 (see pyproject.toml). Moved bookworm -> trixie
+# -> alpine across issue #40's investigation, each step verified before
+# switching, not assumed:
+#   1. bookworm -> trixie (same Debian "slim" family): 98 HIGH/CRITICAL
+#      findings (2 critical) -> 47 (0 critical).
+#   2. trixie -> alpine/musl: re-tested after F3 originally rejected
+#      Alpine/musl for this image (no prebuilt wheels existed then for
+#      pydantic_core/uvloop/httptools/watchfiles, all Rust/C extensions).
+#      Re-verified 2026-11-14: musllinux wheels now exist for all four on
+#      PyPI -- `pip install -r requirements-lock.txt` installs cleanly on
+#      python:3.12-alpine with NO compiler needed, full test suite (11/11)
+#      passes, the service runs and /healthz responds. Unfiltered Trivy:
+#      47 HIGH (trixie) -> 0 HIGH/CRITICAL (alpine, after the krb5-libs/
+#      zlib apk upgrades below) -> 0 findings of ANY severity (after also
+#      removing pip's own package metadata, see below) -- confirmed by a
+#      fully unfiltered scan, not just the HIGH/CRITICAL gate.
+#      Image also shrank: 384MB (trixie) -> 159MB (alpine).
 # Pinned by digest, not just tag (F4 supply-chain hardening) -- see
 # docs/adr/0005-f4-security-supply-chain.md for the update procedure.
-FROM python:3.12-slim-trixie@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b AS builder
+FROM python:3.12-alpine@sha256:c5ba3deef00c7758561a0f03c26f44f10589263d40e732b8748e0d1f38f6dd89 AS builder
 WORKDIR /src
 COPY requirements-lock.txt .
 RUN pip install --no-cache-dir --no-compile -r requirements-lock.txt
 
-FROM python:3.12-slim-trixie@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
-# Patches the one OS package (zlib1g) that had an available point-release
-# fix within trixie itself at assessment time (issue #40) -- everything
-# else in the base image's remaining findings has no upstream fix yet.
-# Version pinned (not a bare `--only-upgrade`) to match this repo's own
-# supply-chain pinning convention and hadolint's DL3008 check; re-resolve
-# with `apt-cache policy zlib1g` inside this image if this ever needs
-# bumping again. Removes apt's own cache afterward so it isn't shipped in
-# the final layer.
-RUN apt-get update && apt-get install --yes --no-install-recommends \
-    --only-upgrade zlib1g=1:1.3.dfsg+really1.3.1-1+deb13u1 \
-    && rm -rf /var/lib/apt/lists/*
-RUN useradd --create-home --uid 1000 appuser
+FROM python:3.12-alpine@sha256:c5ba3deef00c7758561a0f03c26f44f10589263d40e732b8748e0d1f38f6dd89
+# Patches the two OS packages (krb5-libs, zlib) that had an available
+# point-release fix at assessment time -- this cleared every remaining
+# HIGH/CRITICAL finding (16 HIGH -> 0). Version-pinned to match this
+# repo's own supply-chain pinning convention.
+# UNLIKE the base image's digest pin above, this is NOT a long-term-stable
+# pin: Alpine's apk repos only ever serve the CURRENT version of a package
+# for a given Alpine release (confirmed: `apk add pkg=<older-version>`
+# fails outright, "unable to select packages" -- there is no snapshot
+# archive of older versions the way Debian has). Once Alpine ships a
+# newer krb5-libs/zlib, THIS EXACT PIN WILL FAIL THE BUILD (not silently
+# drift) with that same error. When that happens: re-resolve with
+# `apk update && apk search <pkg>` inside a fresh python:3.12-alpine
+# container and bump the version here -- same maintenance event as
+# re-resolving the base image digest, just on apk's own cadence instead.
+RUN apk add --no-cache --upgrade krb5-libs=1.22.3-r0 zlib=1.4-r0 \
+    && adduser -D -u 1000 appuser
 WORKDIR /app
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
+# Only the one console-script binary actually needed at runtime -- the
+# builder's /usr/local/bin also carries pip, mypy, ruff, pytest, idle,
+# and other dev-only tooling that has no reason to ship in the running
+# container (smaller image, smaller attack surface, matches "remove
+# unnecessary dependencies" -- issue #40).
+COPY --from=builder /usr/local/bin/uvicorn /usr/local/bin/uvicorn
 COPY app ./app
+# pip ships baked into python:3.12-alpine's own site-packages (confirmed:
+# present even in a bare, untouched base image) and the builder-stage
+# copy above carries it forward too -- it is not a runtime dependency of
+# this service at all. Removed here, after the copy (removing it before
+# would just have it reintroduced by the copy above, since the builder's
+# own site-packages has it too). This is what cleared the last 5
+# MEDIUM/1 LOW findings (all pip's own CVEs) down to zero.
+RUN rm -rf /usr/local/lib/python3.12/site-packages/pip \
+           /usr/local/lib/python3.12/site-packages/pip-*.dist-info
 # VERSION defaults to "docker-build" -- the honest default for an ordinary
 # (non-release) build. release.yml's publish job passes
 # --build-arg VERSION=<tag> so a published image's /healthz actually
