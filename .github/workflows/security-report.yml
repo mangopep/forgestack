@@ -135,6 +135,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python3 scripts/check-findings-issue-sync.py docs/security/findings-register.json --token "$GH_TOKEN"
 
+      - name: "Detect expired findings-register.json review dates"
+        # scripts/check-npm-audit-baseline.py only checks its own file's
+        # review_by field; this checks docs/security/findings-register.json
+        # itself, which could drift out of sync with that file's date (two
+        # separate documents) and covers every tracked finding, not just
+        # the npm one. Advisory, same reasoning as the drift check above.
+        run: python3 scripts/check-findings-register-expiry.py docs/security/findings-register.json
+
       - name: Generate the security report from real evidence (never claims PASS for missing evidence)
         run: |
           go run ./cmd/secreport \
