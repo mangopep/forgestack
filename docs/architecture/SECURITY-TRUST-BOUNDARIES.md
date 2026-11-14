@@ -58,9 +58,11 @@ but a real gap the moment that changes.
 
 ## Other boundaries, for completeness
 
-- **Secrets**: `gitleaks` (full history) + `scripts/review_guard.py` (baseline patterns) scan
-  every PR; `GITHUB_TOKEN` is `permissions: read` by default per workflow, elevated only where
-  a specific job needs it (e.g. `codeql.yml`'s `security-events: write`).
+- **Secrets**: `gitleaks` (that PR's commits — not full history, confirmed from a live run; a
+  deeper full-history scan runs locally/on demand, see `docs/security/VULNERABILITY-LIFECYCLE.md`)
+  + `scripts/review_guard.py` (baseline patterns) scan every PR; `GITHUB_TOKEN` is
+  `permissions: read` by default per workflow, elevated only where a specific job needs it
+  (e.g. `codeql.yml`'s `security-events: write`).
 - **Dependencies**: `govulncheck` (reachable-vulnerability analysis, not just version
   matching) + Dependabot (grouped PRs per ecosystem) + CodeQL.
 - **Container**: Trivy scans the built image on every PR (HIGH/CRITICAL fails the build);
