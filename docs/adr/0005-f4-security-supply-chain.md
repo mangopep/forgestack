@@ -13,8 +13,10 @@ doesn't support.
 ## What was audited first
 
 F1-F3 already had a solid baseline: `go-quality`/`security-baseline` (gofmt, vet,
-golangci-lint, `go test -race`, `govulncheck`), CodeQL (Go only), `gitleaks` (full
-history), Trivy (both container images, Terraform config), least-privilege `permissions:`
+golangci-lint, `go test -race`, `govulncheck`), CodeQL (Go only), `gitleaks` (believed at
+the time to scan full history on every PR; later confirmed from a live run, and corrected,
+that it scans only that PR's commits — see issue #47 and `docs/security/VULNERABILITY-LIFECYCLE.md`),
+Trivy (both container images, Terraform config), least-privilege `permissions:`
 on every workflow, SHA-pinned actions, Dependabot (gomod/github-actions/docker/npm).
 **Decision: extend this, not replace it** — real gaps closed, nothing working
 restructured.

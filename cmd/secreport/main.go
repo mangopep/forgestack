@@ -80,18 +80,15 @@ func main() {
 		failures = append(failures, secreport.ScanFailure{Tool: "npm-audit", Error: err.Error()})
 	}
 
-	// #40 is tracked here directly rather than parsed from a file: it is a
-	// documented, time-bounded exception recorded in
-	// docs/security/findings-register.json, not a live scanner output.
-	exceptions = append(exceptions, secreport.Exception{
-		ControlType:   secreport.ControlManual,
-		ID:            "#40",
-		Component:     "apps/python-api Dockerfile base image (python:3.12-slim-bookworm)",
-		Justification: "Trivy ignore-unfixed suppresses only OS-package CVEs with no available Debian fix (confirmed: every suppressed finding's Fixed Version column was empty). See docs/security/findings-register.json for full evidence.",
-		Owner:         "mangopep",
-		ReviewBy:      "2027-02-13",
-		IssueURL:      "https://github.com/mangopep/forgestack/issues/40",
-	})
+	// #40 used to be tracked here directly (a hardcoded secreport.Exception
+	// describing Trivy's ignore-unfixed suppression on apps/python-api's
+	// base image) rather than parsed from a file, since it was a manual,
+	// time-bounded exception, not a live scanner output. Removed
+	// 2026-11-14: the underlying finding was actually fixed (base image
+	// moved to python:3.12-alpine, 0 HIGH/CRITICAL remaining), and
+	// ignore-unfixed was removed from CI entirely -- there is no longer
+	// any suppression mechanism to describe here. See
+	// docs/security/findings-register.json's #40 entry for the fix.
 
 	report := secreport.Build(secreport.ReportInput{
 		Repository:   *repository,

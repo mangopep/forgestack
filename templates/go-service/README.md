@@ -40,6 +40,25 @@ docker compose down
 Register them in `internal/platform/router.New()` alongside `/healthz`/`/readyz` — see the
 comment there.
 
+## If a security check fails
+
+`ci.yml`'s `security` job (`govulncheck`) or `container` job (Trivy) failing means a real,
+currently-known vulnerability was found — not a flake to retry past:
+
+- **`govulncheck` fails**: a dependency in `go.mod` has a known, *reachable* vulnerability
+  (govulncheck only flags ones your code actually calls into, not every transitive CVE).
+  Run `go list -m -u all` to see what's outdated, bump the flagged module
+  (`go get <module>@latest`, or a specific patched version), then `go mod tidy` and
+  `go test ./...` before trusting the bump.
+- **Trivy (container scan) fails**: the base image (`golang:...` for the build stage,
+  `gcr.io/distroless/static-debian12:nonroot` for the runtime stage) has a known CVE.
+  Re-run locally with no severity filter to see everything, not just what's gating the
+  build: `trivy image --no-progress <image>:latest`. Re-resolve the digest for whichever
+  stage is affected (see the `Dockerfile`'s own comment) and rebuild.
+- **Never** raise the severity threshold or add a blanket suppression just to make a red
+  check green. If a finding genuinely has no fix yet, that's a real, documented exception
+  with an owner and a review date — not something to silently suppress.
+
 ## Upgrading from a newer version of this template
 
 This project was generated once; it does not automatically track template changes. See
