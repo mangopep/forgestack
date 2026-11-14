@@ -37,6 +37,28 @@ curl -i http://localhost:__PORT__/healthz
 Register them in `app/main.py`'s `create_app()` alongside `health.router` — see the
 comment there.
 
+## If a security check fails
+
+`ci.yml`'s `security` job (`pip-audit`) or `container` job (Trivy) failing means a real,
+currently-known vulnerability was found — not a flake to retry past:
+
+- **`pip-audit` fails**: a dependency in `requirements-lock.txt` has a known CVE. Check if
+  a newer version fixes it (`pip index versions <package>`), bump it in
+  `requirements-lock.txt`, and re-run the full test suite before trusting the bump.
+- **Trivy (container scan) fails**: either an OS package in the base image or a Python
+  dependency has a known CVE. Re-run locally with no severity filter to see everything,
+  not just what's gating the build: `trivy image --no-progress <image>:latest`. If it's
+  the base image and a newer point release of the same Python/OS combination fixes it,
+  re-resolve the digest (see the `Dockerfile`'s own comment) and rebuild. If it's a
+  specific OS package with its own point-release fix available, pin an `apk upgrade
+  <package>=<version>` (Alpine) in the Dockerfile rather than waiting for a full base-image
+  bump — see
+  https://github.com/mangopep/forgestack/blob/main/apps/python-api/Dockerfile for a worked
+  example of exactly this.
+- **Never** add a blanket `ignore-unfixed` or raise the severity threshold just to make a
+  red check green. If a finding genuinely has no fix yet, that's a real, documented
+  exception with an owner and a review date — not something to silently suppress.
+
 ## Upgrading from a newer version of this template
 
 This project was generated once; it does not automatically track template changes. See
