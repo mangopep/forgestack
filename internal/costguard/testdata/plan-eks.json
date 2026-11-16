@@ -1,0 +1,17 @@
+{
+  "format_version": "1.2",
+  "resource_changes": [
+    {
+      "address": "aws_eks_cluster.example[0]",
+      "type": "aws_eks_cluster",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {"actions": ["create"], "after": {}}
+    },
+    {
+      "address": "aws_eks_node_group.example[0]",
+      "type": "aws_eks_node_group",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {"actions": ["create"], "after": {}}
+    }
+  ]
+}

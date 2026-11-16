@@ -1,0 +1,11 @@
+{
+  "format_version": "1.2",
+  "resource_changes": [
+    {
+      "address": "aws_nat_gateway.example[0]",
+      "type": "aws_nat_gateway",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {"actions": ["create"], "after": {}}
+    }
+  ]
+}

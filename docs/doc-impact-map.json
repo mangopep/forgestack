@@ -221,6 +221,18 @@
       "area": "OpenTelemetry tracing and Prometheus metrics",
       "doc_path": "docs/observability/README.md",
       "kind": "manual"
+    },
+    {
+      "pattern": "internal/costguard/**/*.go",
+      "area": "Cost Guard policy engine",
+      "doc_path": "docs/architecture/COST-GUARD.md",
+      "kind": "manual"
+    },
+    {
+      "pattern": "cmd/costguard/**/*.go",
+      "area": "Cost Guard policy engine",
+      "doc_path": "docs/architecture/COST-GUARD.md",
+      "kind": "manual"
     }
   ]
 }

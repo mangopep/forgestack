@@ -30,6 +30,7 @@ const sidebars = {
         'architecture/F3-APPLICATION-FOUNDATION',
         'architecture/F6-LOCAL-FOUNDATION',
         'architecture/PRODUCTION-GRADE-STANDARDS',
+        'architecture/COST-GUARD',
         'architecture/posts-module',
         'adr/go-kit-for-posts-module',
         'adr/gitflow-branching-strategy',
