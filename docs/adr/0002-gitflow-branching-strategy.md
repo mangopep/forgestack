@@ -165,6 +165,10 @@ happen automatically.
 - Block force pushes. Block branch deletion. Require CODEOWNERS review (already active per
   ADR 0001's follow-up work) — in practice this still resolves to the same one person today;
   recorded honestly, not inflated into "independent code owner sign-off."
+  **[Corrected 2026-11-17 — see "Amendment" below: this claim was false. The live ruleset has
+  `require_code_owner_review: false`, and "ADR 0001's follow-up work" does not exist — ADR 0001
+  is the go-kit posts-module refactor, unrelated to branch protection. Left in place rather than
+  deleted so the original (incorrect) reasoning stays visible.]**
 - Allowed merge sources (once `branchpolicy` enforcement is a required check): `staging`,
   `hotfix/*`.
 
@@ -289,3 +293,46 @@ are now unconditionally safe to list as required status checks on `main`, `stagi
   and gained an in-job "Detect relevant changes" step instead, so `trivy-image` and `validate`
   always report a real success/failure and can safely be required checks (see above).
 - No change to `main`'s current behavior, protection, or required checks in this PR.
+
+## Amendment — 2026-11-17: governance documentation correction (no settings changed)
+
+This section corrects factual claims made above and in `.github/CODEOWNERS` against the live
+GitHub ruleset state, confirmed via `gh api repos/mangopep/forgestack/rulesets` and
+`gh api repos/mangopep/forgestack/rulesets/<id>` on 2026-11-17. It does not change any ruleset,
+CODEOWNERS ownership pattern, or merge setting — it only makes the documentation match what is
+actually live, following the discovery of this gap during PR #63's merge review.
+
+**Live ruleset state, as of this amendment** (three active rulesets: `main-production-protection`,
+`staging-production-protection`, `develop-integration-protection`, each `enforcement: active`,
+`bypass_actors: []`, `current_user_can_bypass: never`):
+
+- `required_approving_review_count: 0` on all three branches. This matches this ADR's original
+  "Review requirement, stated honestly for a solo maintainer" decision above — **correct, no
+  change needed**.
+- `require_code_owner_review: false` on all three branches. This **contradicts** the "Require
+  CODEOWNERS review (already active...)" claim for `main` above and the equivalent claim
+  previously in `.github/CODEOWNERS`. Both have been corrected (this file inline above; the
+  CODEOWNERS comment directly) to state plainly that code-owner review is not currently
+  enforced. The `CODEOWNERS` file itself still stands as a *documentation* of ownership/
+  responsibility — that purpose doesn't require ruleset enforcement to be real or useful.
+- No `required_linear_history` rule exists on any of the three branches, and
+  `allowed_merge_methods` includes `merge`, `squash`, and `rebase` on all three. **This is
+  intentional and should stay exactly as-is** — the established promotion architecture is:
+  `feature/* → develop` via **squash merge**, `develop → staging` via a **true merge commit**,
+  and `staging → main` via a **true merge commit** (preserving the "promote the exact same
+  commit" property described in `docs/handbook/BRANCHING.md`, which a squash-only or
+  rebase-only setting on `staging`/`main` would break). This supersedes this ADR's original
+  §"`main`"/§"`staging`" bullets that called for `required_linear_history` — those bullets
+  were the pre-implementation proposal; the promotion-commit-preserving behavior actually needed
+  turned out to require merge commits at those two stages, not a linear-history rule. Do not
+  reintroduce `required_linear_history` or restrict `allowed_merge_methods` on the strength of
+  this ADR's earlier text.
+- All eight required status-check contexts (`go-quality`, `security-baseline`, `analyze`,
+  `gitleaks`, `trivy-image`, `validate`, `docs`, `check`) are present on all three branches,
+  matching this ADR's original specification exactly — **correct, no change needed**.
+
+**Why this wasn't caught earlier:** this ADR's Status line (above) says the rulesets were
+"implemented and tested locally only" with "nothing ... applied to the live GitHub repository"
+at the time of writing (2026-11-12), because the authoring session had no authenticated GitHub
+API access. The rulesets were evidently applied to GitHub in a later session, but this ADR and
+`.github/CODEOWNERS` were never revisited against the live result until this amendment.
