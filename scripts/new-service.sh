@@ -86,7 +86,7 @@ echo "Generating $LANGUAGE service '$SERVICE_NAME' into $OUTPUT_DIR (features: $
 
 # Always-included base files.
 if [ "$LANGUAGE" = "go" ]; then
-  cp -r "$template_dir"/go.mod "$template_dir"/cmd "$template_dir"/internal "$template_dir"/README.md "$template_dir"/.gitignore "$template_dir"/template.json "$STAGE_DIR"/
+  cp -r "$template_dir"/go.mod "$template_dir"/go.sum "$template_dir"/cmd "$template_dir"/internal "$template_dir"/README.md "$template_dir"/.gitignore "$template_dir"/template.json "$STAGE_DIR"/
 else
   cp -r "$template_dir"/app "$template_dir"/tests "$template_dir"/pyproject.toml "$template_dir"/requirements-lock.txt "$template_dir"/README.md "$template_dir"/template.json "$STAGE_DIR"/
 fi

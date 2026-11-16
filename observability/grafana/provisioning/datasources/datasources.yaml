@@ -1,0 +1,35 @@
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    uid: Prometheus
+    isDefault: true
+    editable: false
+
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    uid: Loki
+    editable: false
+    jsonData:
+      # Makes a trace_id field inside a log line (exactly what
+      # internal/platform/middleware.RequestLogging writes) clickable in
+      # Grafana's Explore view, jumping straight to that trace in Tempo --
+      # the "trace correlation" F6 asked for, built from the log/metrics
+      # schema this repo already emits rather than a bespoke join.
+      derivedFields:
+        - datasourceUid: tempo
+          matcherRegex: "trace_id=(\\w+)"
+          name: TraceID
+          url: "${__value.raw}"
+
+  - name: Tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    uid: tempo
+    editable: false

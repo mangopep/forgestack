@@ -13,4 +13,4 @@ Extracted directly from every `os.Getenv`/`os.LookupEnv` call with a string-lite
 | `GITHUB_BASE_REF` | cmd/branchpolicy/main.go:17 |
 | `GITHUB_HEAD_REF` | cmd/branchpolicy/main.go:16 |
 | `HEAD_REF` | cmd/branchpolicy/main.go:16 |
-| `PORT` | cmd/api/main.go:17 |
+| `PORT` | cmd/api/main.go:27 |
