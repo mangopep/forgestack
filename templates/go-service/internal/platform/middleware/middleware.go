@@ -1,16 +1,25 @@
 // Package middleware holds cross-cutting net/http middleware shared across
-// modules: request body size limiting, correlation IDs and structured
-// request logging.
+// modules: request body size limiting, correlation IDs, structured request
+// logging, and OpenTelemetry tracing + Prometheus metrics.
 package middleware
 
 import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"sync/atomic"
 	"time"
+
+	"__MODULE_PATH__/internal/platform/telemetry"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // RequestIDHeader is the header name used to propagate a correlation ID
@@ -88,7 +97,11 @@ func (w *statusRecorder) WriteHeader(code int) {
 
 // RequestLogging wraps next with structured request logging and increments
 // counter once per request. counter is exposed by callers (e.g. a demo
-// metrics endpoint); it is not a replacement for real metrics.
+// metrics endpoint); it is not a replacement for real metrics. If next (or
+// an outer layer such as Telemetry) has already attached an OpenTelemetry
+// span to the request context, the log line also carries trace_id so a log
+// line and a trace can be correlated in Grafana/Loki -- never any header,
+// body, or token value.
 func RequestLogging(counter *atomic.Uint64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -96,13 +109,77 @@ func RequestLogging(counter *atomic.Uint64) func(http.Handler) http.Handler {
 			counter.Add(1)
 			rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 			next.ServeHTTP(rec, r)
-			slog.Info("http_request",
+			attrs := []any{
 				"method", r.Method,
 				"path", r.URL.Path,
 				"status", rec.status,
 				"duration_ms", time.Since(start).Milliseconds(),
 				"request_id", RequestID(r.Context()),
+			}
+			if sc := trace.SpanContextFromContext(r.Context()); sc.HasTraceID() {
+				attrs = append(attrs, "trace_id", sc.TraceID().String())
+			}
+			slog.Info("http_request", attrs...)
+		})
+	}
+}
+
+// inboundPropagator extracts a W3C traceparent/baggage header pair. It is a
+// package-local value, not the global otel.GetTextMapPropagator(), so
+// inbound trace continuation works the instant this middleware runs --
+// it never silently degrades to a no-op just because telemetry.Setup
+// (which also sets the *global* propagator, for any future outbound-call
+// instrumentation) happened not to run first, e.g. in a test or a caller
+// that assembles the router without calling Setup.
+var inboundPropagator = propagation.NewCompositeTextMapPropagator(
+	propagation.TraceContext{}, propagation.Baggage{},
+)
+
+// Telemetry wraps next with OpenTelemetry span creation (extracting any
+// inbound W3C traceparent so a client-supplied trace continues rather than
+// starting a new one) and Prometheus request/error/latency recording.
+// Telemetry must sit directly outside the final mux (optionally with only
+// request-logging-style middleware that forwards the same *http.Request
+// pointer in between) so that r.Pattern -- set by http.ServeMux once it
+// matches a route -- is visible here afterward; without it, the route label
+// falls back to the raw path, which is still correct but loses the
+// low-cardinality guarantee a registered pattern gives for path-parameter
+// routes.
+func Telemetry(m *telemetry.Metrics) func(http.Handler) http.Handler {
+	tracer := otel.Tracer("__SERVICE_NAME__/http")
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := inboundPropagator.Extract(r.Context(), propagation.HeaderCarrier(r.Header))
+			ctx, span := tracer.Start(ctx, r.Method+" "+r.URL.Path, trace.WithSpanKind(trace.SpanKindServer))
+			defer span.End()
+
+			req := r.WithContext(ctx)
+			rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+			start := time.Now()
+			next.ServeHTTP(rec, req)
+			duration := time.Since(start)
+
+			route := req.Pattern
+			if route == "" {
+				route = r.URL.Path
+			}
+			status := strconv.Itoa(rec.status)
+
+			span.SetName(route)
+			span.SetAttributes(
+				attribute.String("http.method", r.Method),
+				attribute.String("http.route", route),
+				attribute.Int("http.status_code", rec.status),
 			)
+			if rec.status >= 500 {
+				span.SetStatus(codes.Error, fmt.Sprintf("http %d", rec.status))
+			}
+
+			m.RequestsTotal.WithLabelValues(r.Method, route, status).Inc()
+			m.RequestDuration.WithLabelValues(r.Method, route).Observe(duration.Seconds())
+			if rec.status >= 400 {
+				m.ErrorsTotal.WithLabelValues(r.Method, route, status).Inc()
+			}
 		})
 	}
 }

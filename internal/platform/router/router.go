@@ -15,12 +15,20 @@ import (
 	posttransport "github.com/mangopep/forgestack/internal/modules/posts/transport"
 	"github.com/mangopep/forgestack/internal/platform/buildinfo"
 	"github.com/mangopep/forgestack/internal/platform/middleware"
+	"github.com/mangopep/forgestack/internal/platform/telemetry"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// New assembles the full application handler.
+// New assembles the full application handler. Each call gets its own
+// Prometheus registry (rather than sharing the global default one), so
+// calling New() more than once -- every test in this package does -- never
+// panics on duplicate metric registration.
 func New() http.Handler {
 	repo := repository.NewInMemory()
 	svc := service.New(repo, nil)
+	reg := prometheus.NewRegistry()
+	metrics := telemetry.NewMetrics(reg)
 
 	var requestCount atomic.Uint64
 	mux := http.NewServeMux()
@@ -36,13 +44,16 @@ func New() http.Handler {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ready", "storage": "in-memory"})
 	})
 	mux.HandleFunc("GET /metrics-demo", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"requests_seen": requestCount.Load(), "note": "demo counter; real metrics in observability lab"})
+		writeJSON(w, http.StatusOK, map[string]any{"requests_seen": requestCount.Load(), "note": "demo counter kept for backward compatibility; GET /metrics below is the real Prometheus endpoint"})
 	})
+	mux.Handle("GET /metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{Registry: reg}))
 
 	mux.Handle("GET /api/v1/posts", posttransport.NewListHandler(svc))
 	mux.Handle("POST /api/v1/posts", middleware.MaxBytes(4096)(posttransport.NewCreateHandler(svc)))
 
-	return middleware.CorrelationID(middleware.RequestLogging(&requestCount)(mux))
+	handler := middleware.RequestLogging(&requestCount)(mux)
+	handler = middleware.Telemetry(metrics)(handler)
+	return middleware.CorrelationID(handler)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

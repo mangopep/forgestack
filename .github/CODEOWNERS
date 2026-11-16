@@ -1,4 +1,10 @@
 # Default owner for everything not matched by a more specific rule below.
-# Branch protection on main already requires "code owner" review (confirmed
-# separately); this is what makes that requirement resolve to someone.
+#
+# This file documents ownership/responsibility; it is NOT currently enforced as a
+# merge requirement. The live GitHub rulesets on main/staging/develop have
+# require_code_owner_review: false (confirmed via the rulesets API 2026-11-17 —
+# see docs/adr/0002-gitflow-branching-strategy.md's 2026-11-17 amendment). An
+# earlier version of this comment claimed code-owner review was "confirmed
+# separately" as enforced; that claim did not match the live ruleset and has
+# been corrected here rather than left to mislead the next reader.
 * @mangopep

@@ -1,0 +1,28 @@
+# Minimal collector: receive OTLP traces over gRPC and HTTP, forward them
+# to Tempo. Metrics and logs are deliberately NOT routed through this
+# collector -- Prometheus scrapes the app's /metrics directly, and Promtail
+# reads container logs directly -- so there is exactly one path per signal,
+# not a redundant second pipeline to keep in sync.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch: {}
+
+exporters:
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/tempo]
