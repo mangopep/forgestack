@@ -1,6 +1,7 @@
 package costguard
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -157,6 +158,41 @@ func TestEvaluateApprovesExplicitlyApprovedCostlyResource(t *testing.T) {
 	d := Evaluate(est, budget, flags, time.Hour, time.Now())
 	if !d.Approved {
 		t.Fatalf("expected approval once the NAT gateway type is explicitly approved, got reasons: %v", d.Reasons)
+	}
+}
+
+// TestEvaluateCannotBypassCostlyResourceCheckByOmittingExtraFlags is a
+// regression test for a confirmed bypass found in adversarial review: an
+// earlier version of Evaluate took costly-resource flags only as an
+// external, caller-supplied slice -- a caller (e.g. the CLI's `evaluate`
+// without --plan) could pass nil and silently skip the check entirely,
+// even for a LIVE estimate whose own Resources list plainly names a NAT
+// gateway. Evaluate must now catch this from est.Resources itself, with no
+// plan file and no extraFlags supplied at all.
+func TestEvaluateCannotBypassCostlyResourceCheckByOmittingExtraFlags(t *testing.T) {
+	hourly, monthly := 0.045, 32.85
+	est := Estimate{
+		Source: SourceLive, GeneratedAt: time.Now(),
+		TotalHourly: &hourly, TotalMonthly: &monthly,
+		Resources: []ResourceCost{
+			{Address: "aws_nat_gateway.example[0]", ResourceType: "aws_nat_gateway", HourlyCost: &hourly, MonthlyCost: &monthly},
+		},
+	}
+	budget := defaultBudget()
+	budget.MaxHourlyUSD = 1.0
+	budget.MaxMonthlyUSD = 100.0 // deliberately generous, so only the unapproved-costly-type check can cause rejection
+	d := Evaluate(est, budget, nil, time.Hour, time.Now())
+	if d.Approved {
+		t.Fatal("expected rejection for an unapproved NAT gateway even with nil extraFlags and no --plan equivalent supplied")
+	}
+	found := false
+	for _, r := range d.Reasons {
+		if strings.Contains(r, "aws_nat_gateway") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a reason naming the NAT gateway, got %v", d.Reasons)
 	}
 }
 

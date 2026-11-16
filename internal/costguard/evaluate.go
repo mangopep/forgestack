@@ -21,10 +21,22 @@ import (
 //     Incomplete() pricing fails the whole estimate closed rather than
 //     silently treating it as free.
 //   - Every flagged costly resource must be explicitly approved in the
-//     budget's ApprovedCostlyResourceTypes.
+//     budget's ApprovedCostlyResourceTypes. This check runs on est.Resources
+//     itself every time Evaluate is called -- it is NOT conditional on
+//     extraFlags being supplied. An earlier version of this function took
+//     the costly-resource flags only as an external, optional parameter;
+//     a caller (e.g. the CLI's `evaluate` without --plan) could omit it and
+//     silently skip the check entirely, which was a confirmed bypass of the
+//     resource-type guardrail -- fixed by computing it internally from the
+//     estimate, which is never optional. extraFlags exists only to add
+//     plan-derived checks this estimate's own resource list can't express
+//     (e.g. large instance *sizes* -- ResourceCost carries no instance_type
+//     field); passing nil here loses that one extra signal, never the core
+//     resource-type guarantee.
 //   - Total hourly/monthly cost (when present) must not exceed the budget.
 //   - The requested playground lifetime must not exceed budget.MaxLifetime.
-func Evaluate(est Estimate, budget Budget, flags []CostlyResourceFlag, requestedTTL time.Duration, now time.Time) Decision {
+func Evaluate(est Estimate, budget Budget, extraFlags []CostlyResourceFlag, requestedTTL time.Duration, now time.Time) Decision {
+	flags := append(FlagCostlyEstimateResources(est.Resources, budget), extraFlags...)
 	d := Decision{
 		Source:           est.Source,
 		FlaggedResources: flags,

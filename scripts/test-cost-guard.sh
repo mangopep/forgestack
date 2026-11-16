@@ -44,6 +44,28 @@ grep -q "aws_nat_gateway" "$test_root/over.out"
 grep -q "exceeds budget max_monthly_usd" "$test_root/over.out"
 echo "ok: all three reasons present in one decision"
 
+echo "=== evaluate: NAT gateway is still caught with NO --plan given at all (bypass regression check) ==="
+generous_budget="$test_root/generous-budget.json"
+cat >"$generous_budget" <<'EOF'
+{"max_hourly_usd": 10.0, "max_monthly_usd": 1000.0, "max_lifetime": "24h", "max_estimate_age": "24h"}
+EOF
+if go run ./cmd/costguard evaluate --estimate internal/costguard/testdata/estimate-over-budget.json --budget "$generous_budget" --ttl 1h >"$test_root/bypass.out" 2>&1; then
+  echo "expected rejection: the NAT gateway in this estimate's own resource list must be caught even with no --plan given" >&2
+  cat "$test_root/bypass.out" >&2
+  exit 1
+fi
+grep -q "aws_nat_gateway" "$test_root/bypass.out"
+echo "ok: costly-resource check is not skippable by omitting --plan"
+
+echo "=== evaluate --live against a directory is rejected without ever invoking infracost ==="
+if INFRACOST_API_KEY=placeholder-not-a-real-key go run ./cmd/costguard evaluate --estimate internal/costguard --budget "$budget" --ttl 1h --live >"$test_root/dir.out" 2>&1; then
+  echo "expected rejection for a directory path under --live" >&2
+  cat "$test_root/dir.out" >&2
+  exit 1
+fi
+grep -qi "directory" "$test_root/dir.out"
+echo "ok: directory path under --live fails closed, caught by the directory guard specifically"
+
 echo "=== evaluate: missing-pricing fixture is rejected, not treated as free ==="
 if go run ./cmd/costguard evaluate --estimate internal/costguard/testdata/estimate-missing-pricing.json --budget "$budget" --ttl 1h >"$test_root/missing.out" 2>&1; then
   echo "expected rejection" >&2

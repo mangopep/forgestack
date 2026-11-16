@@ -56,6 +56,27 @@ func LoadLiveEstimateFromInfracost(ctx context.Context, planJSONPath string) (Es
 			ToolVersion: "infracost (not invoked: " + InfracostAPIKeyEnvVar + " is unset)",
 		}, nil
 	}
+	// Refuse a directory outright, rather than trusting the caller to only
+	// ever pass a file: infracost's default behavior for a directory is to
+	// run terraform init/plan itself, which is exactly the AWS-credential-
+	// resolution hazard this adapter exists to avoid (see the doc comment
+	// above and docs/architecture/COST-GUARD.md -- this was found by
+	// actually hitting it). This check turns a possible silent hang/AWS
+	// call into an immediate, clear rejection. Deliberately checked before
+	// exec.LookPath below: validating our own input shouldn't depend on
+	// whether the infracost binary happens to be installed on this
+	// machine, and a test exercising this guard must behave identically
+	// whether or not it is.
+	info, statErr := os.Stat(planJSONPath)
+	if statErr != nil {
+		return Estimate{Source: SourceUnavailable, GeneratedAt: time.Now().UTC()},
+			fmt.Errorf("stat plan JSON path %q: %w", planJSONPath, statErr)
+	}
+	if info.IsDir() {
+		return Estimate{Source: SourceUnavailable, GeneratedAt: time.Now().UTC()},
+			fmt.Errorf("refusing to run infracost against a directory (%s): infracost would run terraform init/plan itself against it, risking real provider credential resolution -- pass a pre-generated plan JSON file instead (terraform show -json <planfile> > plan.json)", planJSONPath)
+	}
+
 	if _, err := exec.LookPath("infracost"); err != nil {
 		return Estimate{
 			Source:      SourceUnavailable,
@@ -74,7 +95,7 @@ func LoadLiveEstimateFromInfracost(ctx context.Context, planJSONPath string) (Es
 			Source:      SourceUnavailable,
 			GeneratedAt: time.Now().UTC(),
 			ToolVersion: "infracost (invocation failed)",
-		}, fmt.Errorf("infracost breakdown failed: %w: %s", err, stderr.String())
+		}, fmt.Errorf("infracost breakdown failed: %w: %s", err, truncate(stderr.String(), 2000))
 	}
 
 	est, err := parseInfracostJSON(stdout.Bytes())
@@ -129,6 +150,17 @@ func parseInfracostJSON(data []byte) (Estimate, error) {
 		}
 	}
 	return est, nil
+}
+
+// truncate bounds how much of a subprocess's own stderr this adapter will
+// embed in an error message -- defense in depth against an unexpectedly
+// verbose (or, in principle, sensitive) error from a binary this code does
+// not control the output of.
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "... (truncated)"
 }
 
 func parseCostString(s *string) *float64 {

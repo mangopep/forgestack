@@ -135,3 +135,29 @@ func FlagCostlyResources(resources []PlannedResource, budget Budget) []CostlyRes
 	}
 	return flags
 }
+
+// FlagCostlyEstimateResources applies the same known-costly-type
+// classification directly to a cost estimate's own resource list (not a
+// separately-supplied Terraform plan). Evaluate calls this unconditionally
+// on every run -- unlike a plan file, an estimate's Resources list is not
+// an optional argument a caller could omit to skip the check, so this is
+// the trusted, non-bypassable path for the resource-type check. It cannot
+// check instance *size* (ResourceCost carries no instance_type field), only
+// resource *type* -- FlagCostlyResources against an actual plan remains the
+// way to additionally catch large/accelerated instance types.
+func FlagCostlyEstimateResources(resources []ResourceCost, budget Budget) []CostlyResourceFlag {
+	var flags []CostlyResourceFlag
+	for _, r := range resources {
+		reason, costly := knownCostlyResourceTypes[r.ResourceType]
+		if !costly {
+			continue
+		}
+		flags = append(flags, CostlyResourceFlag{
+			Address:            r.Address,
+			ResourceType:       r.ResourceType,
+			Reason:             reason,
+			ExplicitlyApproved: slices.Contains(budget.ApprovedCostlyResourceTypes, r.ResourceType),
+		})
+	}
+	return flags
+}

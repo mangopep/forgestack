@@ -22,6 +22,12 @@ func newFlagSet(name string) *flag.FlagSet {
 	return flag.NewFlagSet(name, flag.ContinueOnError)
 }
 
+// liveEstimateTimeout bounds how long `evaluate --live` will wait for the
+// infracost subprocess before giving up. Fixed, not a flag, to keep this
+// CLI's surface minimal -- raise it here if a real Infracost lookup
+// genuinely needs longer.
+const liveEstimateTimeout = 60 * time.Second
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
@@ -46,14 +52,38 @@ func main() {
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage:
   costguard scan --plan <plan.json> [--budget <budget.json>]
-  costguard evaluate --estimate <estimate.json> --budget <budget.json> [--plan <plan.json>] --ttl <duration> [--live]
+  costguard evaluate --estimate <path> --budget <budget.json> [--plan <plan.json>] --ttl <duration> [--live]
 
-Without --live, "evaluate" always loads --estimate as a MOCK fixture
-(internal/costguard.LoadFixtureEstimate) -- no pricing vendor is ever
-contacted. --live requires INFRACOST_API_KEY to already be set in your own
-environment and the infracost CLI on PATH; see
-docs/architecture/COST-GUARD.md. A MOCK or UNAVAILABLE estimate can never
-approve a deployment, regardless of --live.`)
+"scan" is informational only: it always exits 0, even when it flags a
+costly resource. It never approves or blocks anything. "evaluate" is the
+one gate -- it exits nonzero on any non-approval, and that exit code is
+designed to be the thing a CI step actually checks before proceeding.
+Nothing in this repository currently wires "evaluate"'s exit code into an
+actual deployment step (no terraform apply anywhere calls this first) --
+see docs/architecture/COST-GUARD.md's "Next approval gate."
+
+--estimate's path means two different things depending on --live, which is
+deliberate but easy to misuse, so read this carefully:
+  - without --live (the default): --estimate is a hand-written MOCK fixture
+    JSON file (internal/costguard.LoadFixtureEstimate). No pricing vendor is
+    ever contacted.
+  - with --live: --estimate is instead a pre-generated Terraform plan JSON
+    file (terraform show -json <planfile> > plan.json), fed to the real
+    infracost CLI. It must be a FILE, never a directory -- passing a
+    directory is rejected outright, because infracost would otherwise run
+    terraform init/plan itself against it. --live requires
+    INFRACOST_API_KEY already set in your own environment and the infracost
+    CLI on PATH; see docs/architecture/COST-GUARD.md.
+
+--plan (separate from --estimate) is always a Terraform plan JSON file, used
+to additionally detect large/accelerated instance *sizes* that an estimate's
+own resource list can't express. Costly resource *types* (NAT gateways, EKS,
+load balancers, RDS, ...) are always checked directly from the estimate's
+own resources, with or without --plan -- there is no way to skip that check
+by omitting --plan.
+
+A MOCK or UNAVAILABLE estimate can never approve a deployment, regardless
+of --live or how cheap it looks.`)
 }
 
 func runScan(args []string) error {
@@ -103,7 +133,14 @@ func runEvaluate(args []string) error {
 
 	var est costguard.Estimate
 	if *live {
-		est, err = costguard.LoadLiveEstimateFromInfracost(context.Background(), *estimatePath)
+		// Bounded, not context.Background(): an unbounded context would let
+		// a hung infracost invocation (or any subprocess) block this
+		// process forever -- exactly the hazard documented in
+		// docs/architecture/COST-GUARD.md, where a prior exploratory call
+		// hung rather than failing fast.
+		ctx, cancel := context.WithTimeout(context.Background(), liveEstimateTimeout)
+		defer cancel()
+		est, err = costguard.LoadLiveEstimateFromInfracost(ctx, *estimatePath)
 		if err != nil {
 			return fmt.Errorf("live estimate: %w", err)
 		}

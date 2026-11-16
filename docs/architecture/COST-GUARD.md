@@ -9,6 +9,17 @@ A local, vendor-independent cost-policy foundation (`internal/costguard`, `cmd/c
 anywhere in building or testing this** — every claim below states exactly how it was
 verified, per this repo's evidence-label convention.
 
+> **Tested local safeguard vs. future AWS spending enforcement — read this before trusting
+> either.** Everything in this document is a **tested, local, pre-deployment policy check**:
+> it decides whether to print `"approved": true` and exit 0. It has never been connected to
+> an actual `terraform apply`, an actual AWS account, or AWS's own enforcement mechanisms
+> (AWS Budgets' alerting/actions, IAM/SCP spend guardrails, Cost Explorer). **This tool
+> approving something is not the same as AWS stopping you from spending money** — there is
+> currently no integration point where a rejection here actually blocks a real deployment
+> from happening; that wiring (e.g. a CI step that runs `costguard evaluate` and only then
+> runs `terraform apply` if it exits 0) does not exist yet and is listed under "Next approval
+> gate" below, not implied to exist by this document's tone.
+
 ## What this actually is
 
 `internal/costguard` answers one question: *given a cost estimate and a budget, should a
@@ -114,6 +125,62 @@ credentials and real authorization, not by this tool) is the documented, safe In
 pattern that avoids this entirely — Infracost then only parses JSON and calls its own pricing
 API, no provider, no credentials, no AWS.
 
+## Adversarial review findings (confirmed and fixed)
+
+An independent adversarial review of this package, before any PR, found four real issues —
+none of them in the "a MOCK estimate can never approve" guarantee itself, all in the code
+around it:
+
+1. **A structural bypass of the costly-resource check.** `Evaluate` originally took costly-
+   resource flags only as an external, caller-supplied slice (populated by separately
+   running `ScanPlan`/`FlagCostlyResources` against a plan file). The CLI's `evaluate`
+   subcommand made supplying that plan file *optional* (`--plan`) — so simply not passing
+   `--plan` silently skipped the entire resource-type guardrail, even for a `LIVE` estimate
+   whose own `Resources` list plainly named a NAT gateway or EKS cluster. **Fixed**:
+   `Evaluate` now calls `FlagCostlyEstimateResources` on `est.Resources` itself, every time,
+   unconditionally — there is no parameter that can be omitted to skip it.
+   `TestEvaluateCannotBypassCostlyResourceCheckByOmittingExtraFlags` is a regression test:
+   it fails if this check is ever made optional again. The `--plan`/`extraFlags` path still
+   exists, but now only *adds* large-instance-*size* detection (which an estimate's resource
+   list can't express) on top of the always-on type check, not as the sole source of it.
+2. **The directory-hazard check described above as "found and avoided" was never actually
+   enforced in code** — `LoadLiveEstimateFromInfracost` would have shelled out to `infracost
+   breakdown --path <planJSONPath>` regardless of whether that path was a file or a
+   directory, reproducing the exact hang/credential-resolution hazard on anyone who passed
+   `--live` pointed at a Terraform directory instead of a plan file. **Fixed**: the function
+   now `os.Stat`s the path first and refuses outright if it's a directory, with a clear
+   error naming why. Checked *before* `exec.LookPath("infracost")`, deliberately, so the
+   guard is exercised by its test (`TestLiveAdapterRefusesADirectoryRegardlessOfInfracostInstallation`)
+   whether or not the infracost binary happens to be installed on the machine running the
+   test — on a bare CI runner without it installed, the old ordering would have let
+   `LookPath` fail first and never actually exercised the directory guard at all.
+3. **No timeout on the live subprocess call.** `cmd/costguard`'s `evaluate --live` passed
+   `context.Background()` — unbounded — to `LoadLiveEstimateFromInfracost`, so a hang (the
+   same class already observed above) would have blocked the CLI forever. **Fixed**: the CLI
+   now wraps it in a fixed 60-second `context.WithTimeout`; the adapter function itself
+   already accepted a context, it just wasn't being given a deadline.
+4. **Confusing flag reuse**: `--estimate` meant a MOCK fixture file without `--live`, but a
+   Terraform plan JSON file *with* `--live` — the same flag, two different file types,
+   selected by an unrelated flag. Not a security bug on its own (the directory-rejection
+   fix above closes the actual hazard this confusion could lead to), but a real usability
+   footgun. **Fixed**: `costguard`'s `--help`/usage text now explains both meanings
+   explicitly and states the directory restriction inline, rather than leaving a user to
+   discover it from an error.
+
+Also tightened as defense in depth, not confirmed exploitable on their own: subprocess
+stderr embedded in an error message is now capped at 2000 characters
+(`infracost_adapter.go`'s `truncate`), so an unexpectedly verbose (or, in principle,
+sensitive) error from a binary this code doesn't control the output of can't grow an error
+message unboundedly.
+
+**Documented limitation, not fixed (out of scope — would be a new feature, not a bug fix)**:
+the Infracost JSON adapter (`parseInfracostJSON`) reads only `hourlyCost`/`monthlyCost` per
+resource; it does not parse Infracost's own per-cost-component `usageBased` flags, so
+`ResourceCost.UsageBased` is always `false` for a `LIVE` estimate today, even for a resource
+(S3, a NAT gateway's data processing, ...) that genuinely has usage-based charges beyond its
+flat estimate. The field is still meaningful for hand-written MOCK fixtures, where it's set
+directly. This is recorded here, not silently assumed covered.
+
 ## Distinguishing pre-deployment estimates from actual billing
 
 An `Estimate` from this package — MOCK or (hypothetically) LIVE — is a **pre-deployment
@@ -167,10 +234,13 @@ solved by analogy to the local controller.
 | Unsupported configuration (malformed plan JSON) | `TestScanPlanRejectsMalformedJSON` |
 | TTL exceeding budget | `TestEvaluateRejectsTTLExceedingMaxLifetime` |
 | Live adapter with no key | `TestLiveAdapterIsUnavailableWithoutAnAPIKey` |
+| Live adapter with a missing/malformed plan path | `TestLiveAdapterFailsClosedOnAMissingPath` |
+| Live adapter pointed at a directory (the found-and-fixed hazard) | `TestLiveAdapterRefusesADirectoryRegardlessOfInfracostInstallation` |
 | Mock can never approve | `TestMockEstimateNeverApprovesEvenWellWithinBudget` |
-| End-to-end CLI, fixtures only | `scripts/test-cost-guard.sh` |
+| Costly-resource check cannot be bypassed by omitting the plan/extraFlags | `TestEvaluateCannotBypassCostlyResourceCheckByOmittingExtraFlags` |
+| End-to-end CLI, fixtures only, including the bypass and directory-guard regressions | `scripts/test-cost-guard.sh` |
 
-22 unit tests in `internal/costguard`, all passing; `golangci-lint` 0 issues; `gofmt`/`go
+26 unit tests in `internal/costguard`, all passing; `golangci-lint` 0 issues; `gofmt`/`go
 vet` clean.
 
 ## Operating assumptions and remaining risks
