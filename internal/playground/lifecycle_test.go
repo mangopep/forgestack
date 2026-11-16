@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-func TestCreateAndCleanupIsScopedAndIdempotent(t *testing.T) {
-	root := t.TempDir()
+func createTestSentinel(t *testing.T, root string) string {
+	t.Helper()
 	if err := os.Mkdir(filepath.Join(root, "unrelated"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -17,6 +17,20 @@ func TestCreateAndCleanupIsScopedAndIdempotent(t *testing.T) {
 	if err := os.WriteFile(sentinel, []byte("preserve me"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	return sentinel
+}
+
+func assertSentinelPreserved(t *testing.T, sentinel string) {
+	t.Helper()
+	got, err := os.ReadFile(sentinel) //nolint:gosec // G304: test-only path built from t.TempDir(), not external input
+	if err != nil || string(got) != "preserve me" {
+		t.Fatalf("unrelated resource changed: %q, %v", got, err)
+	}
+}
+
+func TestCreateAndCleanupIsScopedAndIdempotent(t *testing.T) {
+	root := t.TempDir()
+	sentinel := createTestSentinel(t, root)
 	m := NewManager()
 	env, err := m.Create(root, "alice", "playground", time.Hour, []string{"go-api", "docker-compose"})
 	if err != nil {
@@ -38,9 +52,7 @@ func TestCreateAndCleanupIsScopedAndIdempotent(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, env.ID, "resources")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("resources remain: %v", err)
 	}
-	if got, err := os.ReadFile(sentinel); err != nil || string(got) != "preserve me" {
-		t.Fatalf("unrelated resource changed: %q, %v", got, err)
-	}
+	assertSentinelPreserved(t, sentinel)
 	again, err := m.Cleanup(root, env.ID, "alice")
 	if err != nil || again.Cleanup != "VERIFIED CLEAN (already absent)" {
 		t.Fatalf("repeat cleanup: %#v, %v", again, err)

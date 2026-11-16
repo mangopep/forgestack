@@ -39,38 +39,54 @@ type Manager struct{ removeAll func(string) error }
 
 func NewManager() Manager { return Manager{removeAll: os.RemoveAll} }
 
-func (m Manager) Create(root, owner, mode string, ttl time.Duration, modules []string) (Environment, error) {
+func validateCreateInputs(owner, mode string, ttl time.Duration, modules []string) error {
 	if strings.TrimSpace(owner) == "" {
-		return Environment{}, errors.New("owner is required")
+		return errors.New("owner is required")
 	}
 	if mode != "playground" && mode != "product" {
-		return Environment{}, errors.New("mode must be playground or product")
+		return errors.New("mode must be playground or product")
 	}
 	if mode == "playground" && (ttl <= 0 || ttl > maxTTL) {
-		return Environment{}, fmt.Errorf("playground TTL must be between 1s and %s", maxTTL)
+		return fmt.Errorf("playground TTL must be between 1s and %s", maxTTL)
 	}
 	if mode == "product" && ttl != 0 {
-		return Environment{}, errors.New("product environments cannot have an expiration")
+		return errors.New("product environments cannot have an expiration")
 	}
 	for _, module := range modules {
 		if strings.TrimSpace(module) == "" {
-			return Environment{}, errors.New("module names cannot be empty")
+			return errors.New("module names cannot be empty")
 		}
 	}
+	return nil
+}
 
+// realRootDir creates root if needed and returns its absolute path, rejecting
+// a symlinked root so cleanup's ownership checks cannot be redirected.
+func realRootDir(root string) (string, error) {
 	if err := os.MkdirAll(root, 0700); err != nil {
-		return Environment{}, fmt.Errorf("create environment root: %w", err)
+		return "", fmt.Errorf("create environment root: %w", err)
 	}
 	rootPath, err := filepath.Abs(root)
 	if err != nil {
-		return Environment{}, err
+		return "", err
 	}
 	rootInfo, err := os.Lstat(rootPath)
 	if err != nil {
-		return Environment{}, err
+		return "", err
 	}
 	if !rootInfo.IsDir() || rootInfo.Mode()&os.ModeSymlink != 0 {
-		return Environment{}, errors.New("environment root must be a real directory, not a symlink")
+		return "", errors.New("environment root must be a real directory, not a symlink")
+	}
+	return rootPath, nil
+}
+
+func (m Manager) Create(root, owner, mode string, ttl time.Duration, modules []string) (Environment, error) {
+	if err := validateCreateInputs(owner, mode, ttl, modules); err != nil {
+		return Environment{}, err
+	}
+	rootPath, err := realRootDir(root)
+	if err != nil {
+		return Environment{}, err
 	}
 	var random [8]byte
 	if _, err := rand.Read(random[:]); err != nil {
@@ -97,84 +113,87 @@ func (m Manager) Create(root, owner, mode string, ttl time.Duration, modules []s
 	return env, nil
 }
 
-// Cleanup removes only the verified environment's resources directory. It retains
-// the ownership record as evidence and never traverses a caller-selected resource path.
-func (m Manager) Cleanup(root, id, owner string) (Result, error) {
-	if !safeID.MatchString(id) {
-		return Result{}, errors.New("invalid environment ID")
-	}
-	if strings.TrimSpace(owner) == "" {
-		return Result{}, errors.New("owner is required")
-	}
-	rootPath, err := filepath.Abs(root)
+// cleanupRootState validates root is a real, non-symlinked directory and
+// snapshots its entries before any removal, so a later inventory comparison
+// can detect anything outside the owned environment changing.
+func cleanupRootState(root string) (rootPath string, entriesBefore []os.DirEntry, err error) {
+	rootPath, err = filepath.Abs(root)
 	if err != nil {
-		return Result{}, err
+		return "", nil, err
 	}
 	rootInfo, err := os.Lstat(rootPath)
 	if err != nil {
-		return Result{}, fmt.Errorf("inspect environment root: %w", err)
+		return "", nil, fmt.Errorf("inspect environment root: %w", err)
 	}
 	if !rootInfo.IsDir() || rootInfo.Mode()&os.ModeSymlink != 0 {
-		return Result{}, errors.New("environment root must be a real directory")
+		return "", nil, errors.New("environment root must be a real directory")
 	}
-	entriesBefore, err := os.ReadDir(rootPath)
+	entriesBefore, err = os.ReadDir(rootPath)
 	if err != nil {
-		return Result{}, err
+		return "", nil, err
 	}
-	dir := filepath.Join(rootPath, id)
-	dirInfo, err := os.Lstat(dir)
-	if errors.Is(err, fs.ErrNotExist) {
-		return Result{Cleanup: "VERIFIED CLEAN (already absent)"}, nil
-	}
-	if err != nil {
-		return Result{}, fmt.Errorf("inspect environment: %w", err)
-	}
-	if !dirInfo.IsDir() || dirInfo.Mode()&os.ModeSymlink != 0 {
-		return Result{}, errors.New("environment path is not a real directory")
-	}
-	metadataPath := filepath.Join(dir, "environment.json")
+	return rootPath, entriesBefore, nil
+}
+
+// loadOwnedEnvironment reads and validates the ownership record at
+// metadataPath, confirming the caller-supplied id and owner match it and
+// that the environment is a playground (cleanup is forbidden for product).
+func loadOwnedEnvironment(metadataPath, id, owner string) (Environment, error) {
 	metaInfo, err := os.Lstat(metadataPath)
 	if err != nil {
-		return Result{}, errors.New("environment ownership record is missing")
+		return Environment{}, errors.New("environment ownership record is missing")
 	}
 	if !metaInfo.Mode().IsRegular() {
-		return Result{}, errors.New("environment ownership record is not a regular file")
+		return Environment{}, errors.New("environment ownership record is not a regular file")
 	}
 	var env Environment
-	data, err := os.ReadFile(metadataPath)
+	data, err := os.ReadFile(metadataPath) //nolint:gosec // G304: path is built from a regex-validated environment ID, not arbitrary input
 	if err != nil {
-		return Result{}, err
+		return Environment{}, err
 	}
 	if err := json.Unmarshal(data, &env); err != nil {
-		return Result{}, fmt.Errorf("read environment ownership record: %w", err)
+		return Environment{}, fmt.Errorf("read environment ownership record: %w", err)
 	}
 	if env.ID != id || env.Owner != owner {
-		return Result{}, errors.New("environment ID or owner does not match ownership record")
+		return Environment{}, errors.New("environment ID or owner does not match ownership record")
 	}
 	if env.Mode != "playground" {
-		return Result{}, errors.New("automatic cleanup is forbidden for persistent product environments")
+		return Environment{}, errors.New("automatic cleanup is forbidden for persistent product environments")
 	}
+	return env, nil
+}
+
+// removeOwnedResources removes dir's resources subdirectory (if present) and
+// verifies its absence afterward, recording cleanup_incomplete or
+// cleanup_unverified on env rather than ever inferring success.
+func (m Manager) removeOwnedResources(dir, metadataPath string, env Environment) (Result, bool, error) {
 	resources := filepath.Join(dir, "resources")
 	resourceInfo, err := os.Lstat(resources)
 	alreadyAbsent := errors.Is(err, fs.ErrNotExist)
 	if err != nil && !alreadyAbsent {
-		return Result{}, err
+		return Result{}, false, err
 	}
 	if !alreadyAbsent {
 		if !resourceInfo.IsDir() || resourceInfo.Mode()&os.ModeSymlink != 0 {
-			return Result{}, errors.New("owned resources path is not a real directory")
+			return Result{}, false, errors.New("owned resources path is not a real directory")
 		}
 		if err := m.removeAll(resources); err != nil {
 			env.Status = "cleanup_incomplete"
 			_ = writeMetadata(metadataPath, env)
-			return Result{Environment: env, Cleanup: "CLEANUP INCOMPLETE"}, fmt.Errorf("remove owned local resources: %w", err)
+			return Result{Environment: env, Cleanup: "CLEANUP INCOMPLETE"}, false, fmt.Errorf("remove owned local resources: %w", err)
 		}
 	}
 	if _, err := os.Lstat(resources); !errors.Is(err, fs.ErrNotExist) {
 		env.Status = "cleanup_unverified"
 		_ = writeMetadata(metadataPath, env)
-		return Result{Environment: env, Cleanup: "CLEANUP UNVERIFIED"}, errors.New("owned resources remain or cannot be verified absent")
+		return Result{Environment: env, Cleanup: "CLEANUP UNVERIFIED"}, false, errors.New("owned resources remain or cannot be verified absent")
 	}
+	return Result{Environment: env}, alreadyAbsent, nil
+}
+
+// finalizeCleanup compares the root's sibling inventory against its
+// pre-removal snapshot and only then records verified_clean.
+func finalizeCleanup(rootPath, id, metadataPath string, env Environment, entriesBefore []os.DirEntry, alreadyAbsent bool) (Result, error) {
 	entriesAfter, err := os.ReadDir(rootPath)
 	if err != nil {
 		return Result{Environment: env, Cleanup: "CLEANUP UNVERIFIED"}, fmt.Errorf("verify environment inventory: %w", err)
@@ -191,6 +210,42 @@ func (m Manager) Cleanup(root, id, owner string) (Result, error) {
 		status += " (already absent)"
 	}
 	return Result{Environment: env, Cleanup: status}, nil
+}
+
+// Cleanup removes only the verified environment's resources directory. It retains
+// the ownership record as evidence and never traverses a caller-selected resource path.
+func (m Manager) Cleanup(root, id, owner string) (Result, error) {
+	if !safeID.MatchString(id) {
+		return Result{}, errors.New("invalid environment ID")
+	}
+	if strings.TrimSpace(owner) == "" {
+		return Result{}, errors.New("owner is required")
+	}
+	rootPath, entriesBefore, err := cleanupRootState(root)
+	if err != nil {
+		return Result{}, err
+	}
+	dir := filepath.Join(rootPath, id)
+	dirInfo, err := os.Lstat(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return Result{Cleanup: "VERIFIED CLEAN (already absent)"}, nil
+	}
+	if err != nil {
+		return Result{}, fmt.Errorf("inspect environment: %w", err)
+	}
+	if !dirInfo.IsDir() || dirInfo.Mode()&os.ModeSymlink != 0 {
+		return Result{}, errors.New("environment path is not a real directory")
+	}
+	metadataPath := filepath.Join(dir, "environment.json")
+	env, err := loadOwnedEnvironment(metadataPath, id, owner)
+	if err != nil {
+		return Result{}, err
+	}
+	removed, alreadyAbsent, err := m.removeOwnedResources(dir, metadataPath, env)
+	if err != nil {
+		return removed, err
+	}
+	return finalizeCleanup(rootPath, id, metadataPath, removed.Environment, entriesBefore, alreadyAbsent)
 }
 
 func sameSiblingInventory(before, after []os.DirEntry, id string) bool {
