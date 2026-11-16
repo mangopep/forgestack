@@ -31,8 +31,10 @@ section is policy for when that changes, not a description of something that exi
 
 - A reusable module gets its own directory and SemVer git tag (`<name>/vX.Y.Z`). A consumer
   references an exact tag or commit SHA — never a mutable branch.
-- A published tag is immutable. A broken release gets a new patch version, never a silent
-  retag of an existing one.
+- A published tag is immutable *by policy*. **This is not yet enforced by a GitHub ruleset**
+  — the live branch rulesets protect `refs/heads/*` only, not `refs/tags/*`; see ADR 0007's
+  "future tag-protection requirement" for what adding real enforcement needs. A broken
+  release gets a new patch version, never a silent retag of an existing one.
 - A breaking change is a major version bump with a migration doc under `docs/migrations/` and
   the same PR review every other change here gets — no separate approval process.
 

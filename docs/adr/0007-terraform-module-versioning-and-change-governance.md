@@ -24,14 +24,25 @@ second module to test).
 
 ### 1. Pin supported Terraform CLI versions
 
-**Implemented.** `main.tf`'s `required_version` was `>= 1.7.0` (an unbounded lower bound —
-would silently accept an untested future Terraform 2.x). Changed to
-`">= 1.7.0, < 2.0.0"`. `.github/workflows/terraform-checks.yml`'s `hashicorp/setup-terraform`
-step previously passed no `terraform_version` input, defaulting to whatever is "latest" at
-each CI run — unpinned, not reproducible. Pinned to the exact version this ADR's changes were
-verified against (`1.14.3`). *Confirmed from configuration and local test
+**Implemented**, with two distinct version statements that this ADR is deliberately explicit
+about not conflating:
+
+- **Supported range** (`main.tf`'s `required_version`): was `>= 1.7.0` (an unbounded lower
+  bound — would silently accept an untested future Terraform 2.x). Changed to
+  `">= 1.7.0, < 2.0.0"`. Anything in this range is *accepted*; it is not a claim that every
+  version in it was individually tested against this module.
+- **Exact CI-tested version** (`.github/workflows/terraform-checks.yml`'s
+  `hashicorp/setup-terraform` step): previously passed no `terraform_version` input, defaulting
+  to whatever is "latest" at each CI run — unpinned, not reproducible, and not necessarily
+  inside the supported range above once a new major ships. Pinned to `1.14.3` — the one
+  specific version this ADR's changes were actually run against and verified with. A future
+  bump of this exact pin is a deliberate, separately-reviewed change (re-run `fmt`/`validate`/
+  the safety-check script against the new version before merging it), not an automatic
+  "latest" drift.
+
+*Confirmed from configuration and local test
 (`scripts/test-terraform-safety-checks.sh`'s "unsupported Terraform CLI version constraint is
-rejected" case proves the bound is actually enforced, not just written).*
+rejected" case proves the supported-range bound is actually enforced, not just written).*
 
 ### 2. Bounded provider version constraints and committed multi-platform lockfile
 
@@ -58,12 +69,27 @@ policy this repo commits to, for the day a second consumer or a child-module cat
   A branch reference is rejected the same way `internal/branchpolicy` already rejects an
   unapproved merge source — enforced the day a module registry's `source =` strings are
   worth linting.
-- A published module tag is immutable: re-tagging an existing version is a force-push to a
-  Git ref and is blocked the same way force-pushes to `main`/`staging`/`develop` already are
-  blocked by the live rulesets (confirmed `non_fast_forward` rule present on all three,
-  2026-11-17). A genuinely broken release gets a new patch version, never a silent
-  retag — the identical principle `docs/VERSIONING.md` already states for container images
-  and templates.
+- A published module tag must be immutable. **This is not currently enforced, and an earlier
+  draft of this ADR incorrectly claimed it was** — it reasoned that tags get the same
+  force-push protection as `main`/`staging`/`develop` because those branches' rulesets block
+  `non_fast_forward`. That reasoning was wrong: checked directly against the live rulesets
+  API on 2026-11-17, all three (`main-production-protection`, `staging-production-protection`,
+  `develop-integration-protection`) have `target: branch` and
+  `conditions.ref_name.include: ["refs/heads/<branch>"]` only — none target `refs/tags/*`,
+  no fourth `target: tag` ruleset exists, and the legacy
+  `GET /repos/.../tags/protection` endpoint returns 404 (no tag protection configured through
+  that mechanism either). The repository's three existing release tags (`v0.1.0`, `v0.1.1`,
+  `v0.1.2`, confirmed via `git ls-remote --tags`) are **unprotected today** — anyone with push
+  access could force-move or delete any of them, and nothing here or on GitHub would stop it.
+  **Future tag-protection requirement, not yet done:** add a GitHub ruleset with
+  `target: "tag"` and a `conditions.ref_name.include` pattern matching the module-tag scheme
+  (e.g. `refs/tags/*/v*` once a module catalog exists, or `refs/tags/v*` for the existing
+  release tags today), with at least `update` and `deletion` rules blocked. Until that
+  ruleset exists, "a published tag is immutable" is a policy intention this repo has not yet
+  enforced, not a guarantee — do not rely on it, and do not create that ruleset without
+  explicit approval (it is a repository-setting change, out of scope for this ADR). A
+  genuinely broken release should still get a new patch version rather than a retag, as a
+  matter of policy now; the ruleset is what would make that the only option, later.
 
 ### 6. Backward compatibility within minor/patch; approval + migration docs for breaking changes
 
@@ -117,13 +143,39 @@ to satisfy this item on paper — an untested backend block is worse than an hon
 
 ### 11. Never commit state, credentials, secrets, or sensitive plan artifacts
 
-**Implemented, verified.** `.gitignore` already excluded `.terraform/`, `*.tfstate`,
-`*.tfstate.*`, and `*.tfvars` (with a tracked `.terraform.tfvars.example`). This ADR adds the
-one real gap found: `*.tfplan`/`*.plan` and `.terraformrc`/`terraform.rc` were **not**
-previously excluded — a `terraform plan -out=plan.tfplan` run locally, or a CLI config
-holding a credentials block, could have been committed by accident. *Confirmed from
-configuration (`.gitignore` diff); confirmed from `git log` that no `.tfstate`/`.tfplan`/
-credentials file has ever been committed to this repository.*
+**Implemented, verified** — with real limitations named, not assumed away. `.gitignore`
+already excluded `.terraform/`, `*.tfstate`, `*.tfstate.*`, and `*.tfvars` (with a tracked
+`.terraform.tfvars.example`). This ADR adds the one real gap found: `*.tfplan`/`*.plan` and
+`.terraformrc`/`terraform.rc` were **not** previously excluded. *Confirmed from configuration
+(`.gitignore` diff); confirmed from `git log` that no `.tfstate`/`.tfplan`/credentials file
+has ever been committed to this repository.*
+
+**What `.gitignore` does *not* protect against** (named explicitly, since relying on it
+past these limits would be a false sense of safety):
+
+- It only stops `git add`/`git commit` from staging a file whose *path* matches a pattern.
+  `git add -f` (force-add) bypasses it entirely, as does `git add` on a file that was already
+  tracked before the ignore rule existed.
+- It does nothing for a secret pasted *into* a tracked, non-ignored file — e.g. an AWS key
+  typed directly into `main.tf` or a `.tfvars.example` — since the file itself isn't excluded,
+  only certain filenames/patterns are.
+- It is local-developer-honor-system enforcement: nothing server-side checks that a given push
+  actually respected `.gitignore` before it existed, or that a contributor's clone has the same
+  rules (a global `core.excludesFile` override, for instance, is outside this repo's control).
+
+**What this repo's existing secret scanning (`gitleaks`, `.github/workflows/secret-scan.yml`
+and `security-report.yml`) adds, and where *it* stops:** gitleaks scans the actual *content*
+of tracked files/commits for known secret-shaped patterns (AWS access key ID format, private
+key headers, etc.) — this is real content inspection, not filename matching, and would catch
+an AWS key typed into `main.tf` that `.gitignore` alone would miss. Its own limits: it is
+pattern-based, so a secret in a format it doesn't recognize, or one deliberately obfuscated
+(base64-wrapped, split across lines, etc.), can pass through undetected; it scans what's
+pushed, not a working tree that's never pushed; and it does not understand Terraform
+semantics (it would not, for example, flag a `sensitive = true` variable's value echoed in a
+CI log by an unrelated `terraform plan`/`output` command — that's a separate real risk no tool
+in this repo currently checks for, named here as a gap rather than silently assumed covered).
+*Confirmed from configuration (workflow files); the pattern-based-scanner limitation is a
+property of gitleaks itself, not something locally re-tested here.*
 
 ### 12. Prevent concurrent apply/destroy on the same environment
 
