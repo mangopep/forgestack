@@ -1,5 +1,11 @@
 terraform {
-  required_version = ">= 1.7.0"
+  # Bounded, not just a lower bound: >= 1.7.0 alone would silently accept a
+  # future Terraform 2.x whose behavior was never tested against this
+  # module. CI pins the exact tested version (1.14.3, see
+  # .github/workflows/terraform-checks.yml) inside this range; see
+  # docs/adr/0007-terraform-module-versioning-and-change-governance.md for
+  # the deliberate-bump policy.
+  required_version = ">= 1.7.0, < 2.0.0"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
