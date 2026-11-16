@@ -93,8 +93,8 @@ docker run -d --name my-service \
 
 Then send it some traffic (`curl localhost:8080/healthz` a few times) and open
 <http://localhost:3000> — the "ForgeStack service overview" dashboard is provisioned
-automatically (anonymous access, Admin role, **local-dev-only**: never expose this
-Grafana to a network you don't fully trust, it has no real login).
+automatically with anonymous Admin access and no login form, which is a
+**local-development-only** convenience (see "Security posture" below).
 
 ### Verify each signal landed, without the UI
 
@@ -119,6 +119,30 @@ docker compose -f observability/compose.yaml down -v   # also delete Prometheus/
 **Verify cleanup:** `docker compose -f observability/compose.yaml ps` should print no
 containers; with `-v`, `docker volume ls | grep forgestack-observability` should print
 nothing.
+
+## Security posture: local development, not production monitoring
+
+This stack's defaults are deliberately convenient for one developer on one machine,
+and deliberately **not** a template for a shared or production deployment:
+
+- **Every published port is bound to `127.0.0.1`** (`127.0.0.1:3000:3000`, etc., not
+  bare `3000:3000`) in `compose.yaml`. Docker publishes a bare `host:container` port
+  mapping on `0.0.0.0` by default, which would make Grafana, Prometheus, Loki, Tempo,
+  and the OTel Collector's unauthenticated endpoints reachable from anyone else on your
+  Wi-Fi/LAN, not just this machine. Loopback binding is the actual enforcement
+  mechanism here — not a comment asking you to be careful.
+- **Grafana's anonymous Admin access is survivable precisely because of that loopback
+  binding**, not on its own. If you ever need this stack reachable from another
+  machine (a shared team instance, a remote dev box), the loopback-only port bindings
+  must be relaxed deliberately *and* Grafana's anonymous-Admin environment variables
+  must be replaced with real authentication (`GF_SECURITY_ADMIN_PASSWORD` at minimum,
+  SSO/OAuth for more than one operator) at the same time — never relax one without the
+  other.
+- **A production or shared-network monitoring stack is a different thing entirely**:
+  real authentication throughout, TLS between components, retention and access-control
+  policy matched to actual data sensitivity, and almost certainly a managed backend
+  (Grafana Cloud, AWS CloudWatch/X-Ray, etc.) rather than five hand-configured
+  containers. Nothing in this directory should be copied as-is into that context.
 
 ## Known limitations (reported honestly, not hidden)
 
