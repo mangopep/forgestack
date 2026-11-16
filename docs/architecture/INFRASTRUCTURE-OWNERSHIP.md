@@ -4,15 +4,17 @@ title: Infrastructure ownership and environment isolation
 
 # Infrastructure ownership and environment isolation
 
-**Status: mostly planned.** Only the sandbox Terraform example (greyed below as "opt-in,
-not deployed") exists today. No AWS account structure, no multiple environments, and no
-Terraform remote-state backend have been built — this diagram shows the intended shape (per
-`docs/COST-SAFETY.md` and the F6/F7 roadmap modules) so later work has a target, not a claim
-that it's running.
+**Status: local lifecycle implemented; cloud ownership planned.** F6 adds local playground
+IDs, owners, expiration metadata, resource scoping and cleanup verification. The AWS S3
+Terraform sample remains opt-in and no AWS account structure, remote-state backend, cloud
+environment registry or cloud cleanup controller exists. See
+`docs/architecture/F6-LOCAL-FOUNDATION.md` for the verified local scope and Terraform
+conventions.
 
 ```mermaid
 flowchart TB
     subgraph today["Implemented today"]
+        local["Local playground lifecycle<br/>unique ID + owner + TTL metadata<br/>scoped cleanup + local verification"]
         sandbox["infrastructure/terraform/aws-s3-sandbox<br/>enable_resources=false by default<br/>no remote state, local only"]
     end
 
@@ -38,7 +40,7 @@ flowchart TB
 
     classDef done fill:#2f855a,color:#fff,stroke:#22543d
     classDef todo fill:#718096,color:#fff,stroke:#4a5568,stroke-dasharray: 4 3
-    class sandbox done
+    class local,sandbox done
     class dev_env,staging_env,prod_env,state,oidc,iam todo
 ```
 

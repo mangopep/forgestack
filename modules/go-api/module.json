@@ -1,0 +1,17 @@
+{
+  "name": "go-api",
+  "version": "1.0.0",
+  "contract_version": "1.0.0",
+  "category": "backend",
+  "provides": ["application.http-api", "application.health-probes"],
+  "optional": [{"capability": "deployment.docker-compose", "version": ">=1.0.0"}],
+  "languages": ["go"],
+  "runtimes": ["go>=1.23"],
+  "configuration": {
+    "PORT": "listen port (default 8080)"
+  },
+  "deployment_targets": ["local-process", "docker-compose"],
+  "health_checks": ["GET /healthz", "GET /readyz"],
+  "ownership": {"scope": "environment", "required_tags": ["forgestack.environment_id", "forgestack.owner"]},
+  "cleanup_behavior": "environment-owned-only"
+}

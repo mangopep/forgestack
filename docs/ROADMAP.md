@@ -2,6 +2,18 @@
 
 Every lab follows: **understand -> build -> test -> break -> observe -> diagnose -> fix -> secure -> review -> document -> destroy temporary cloud resources**.
 
+## Platform phase status
+
+- **F1–F5:** implemented; see the implementation status table in `README.md` and their
+  architecture decision records.
+- **F6 local foundation:** versioned module manifests, capability/provider-version
+  validation, deterministic template generation, and a local ownership/TTL/cleanup flow
+  are implemented and verified on the dedicated F6 feature branch. AWS adapters,
+  Terraform remote state, automatic expiry reconciliation and cloud cleanup remain
+  unimplemented. See `docs/architecture/F6-LOCAL-FOUNDATION.md`.
+- **F7 onward:** not started. AI, MCP, RAG, observability and Kubernetes remain future
+  module categories; no empty placeholder modules are included.
+
 | Module | Skills | Build / break exercise | Evidence |
 |---|---|---|---|
 | 00 | Mac M4, shells, Git, Homebrew | inspect environment and install tools | setup transcript |

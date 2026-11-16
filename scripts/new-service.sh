@@ -65,25 +65,30 @@ if [ "$LANGUAGE" = "go" ]; then
 fi
 
 if [ -e "$OUTPUT_DIR" ]; then
-  if [ -n "$(ls -A "$OUTPUT_DIR" 2>/dev/null)" ]; then
-    echo "error: $OUTPUT_DIR already exists and is not empty -- refusing to overwrite" >&2
-    exit 1
-  fi
+  echo "error: $OUTPUT_DIR already exists -- refusing to overwrite" >&2
+  exit 1
 fi
+
+OUTPUT_PARENT="$(dirname "$OUTPUT_DIR")"
+OUTPUT_NAME="$(basename "$OUTPUT_DIR")"
+mkdir -p "$OUTPUT_PARENT"
+STAGE_DIR="$(mktemp -d "$OUTPUT_PARENT/.${OUTPUT_NAME}.forgestack.XXXXXX")"
+cleanup_stage() { [ -z "${STAGE_DIR:-}" ] || rm -rf "$STAGE_DIR"; }
+trap cleanup_stage EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 template_dir="$repo_root/templates/${LANGUAGE}-service"
 [ -d "$template_dir" ] || { echo "error: template not found: $template_dir" >&2; exit 1; }
 
-mkdir -p "$OUTPUT_DIR"
-
 echo "Generating $LANGUAGE service '$SERVICE_NAME' into $OUTPUT_DIR (features: $FEATURES)..."
 
 # Always-included base files.
 if [ "$LANGUAGE" = "go" ]; then
-  cp -r "$template_dir"/go.mod "$template_dir"/cmd "$template_dir"/internal "$template_dir"/README.md "$template_dir"/.gitignore "$template_dir"/template.json "$OUTPUT_DIR"/
+  cp -r "$template_dir"/go.mod "$template_dir"/cmd "$template_dir"/internal "$template_dir"/README.md "$template_dir"/.gitignore "$template_dir"/template.json "$STAGE_DIR"/
 else
-  cp -r "$template_dir"/app "$template_dir"/tests "$template_dir"/pyproject.toml "$template_dir"/requirements-lock.txt "$template_dir"/README.md "$template_dir"/template.json "$OUTPUT_DIR"/
+  cp -r "$template_dir"/app "$template_dir"/tests "$template_dir"/pyproject.toml "$template_dir"/requirements-lock.txt "$template_dir"/README.md "$template_dir"/template.json "$STAGE_DIR"/
 fi
 
 IFS=',' read -ra FEATURE_LIST <<< "$FEATURES"
@@ -95,51 +100,76 @@ has_feature() {
   return 1
 }
 
+for feature in "${FEATURE_LIST[@]}"; do
+  case "$feature" in
+    base|docker|ci) ;;
+    *) echo "error: unsupported feature '$feature' (supported: base,docker,ci)" >&2; exit 1 ;;
+  esac
+done
+
 if has_feature docker; then
-  cp "$template_dir/Dockerfile" "$OUTPUT_DIR/Dockerfile"
-  [ -f "$template_dir/compose.yaml" ] && cp "$template_dir/compose.yaml" "$OUTPUT_DIR/compose.yaml"
-  [ -f "$template_dir/.dockerignore" ] && cp "$template_dir/.dockerignore" "$OUTPUT_DIR/.dockerignore"
+  cp "$template_dir/Dockerfile" "$STAGE_DIR/Dockerfile"
+  [ -f "$template_dir/compose.yaml" ] && cp "$template_dir/compose.yaml" "$STAGE_DIR/compose.yaml"
+  [ -f "$template_dir/.dockerignore" ] && cp "$template_dir/.dockerignore" "$STAGE_DIR/.dockerignore"
 fi
 
 if has_feature ci; then
-  mkdir -p "$OUTPUT_DIR/.github/workflows"
-  cp "$template_dir/.github/workflows/ci.yml" "$OUTPUT_DIR/.github/workflows/ci.yml"
+  mkdir -p "$STAGE_DIR/.github/workflows"
+  cp "$template_dir/.github/workflows/ci.yml" "$STAGE_DIR/.github/workflows/ci.yml"
 fi
 
-# Substitute placeholders in every text file (skip binaries, there are none
-# in these templates, but this guards against future additions).
-find "$OUTPUT_DIR" -type f -print0 | while IFS= read -r -d '' f; do
-  if file "$f" | grep -q text; then
-    sed -i '' \
-      -e "s|__SERVICE_NAME__|${SERVICE_NAME}|g" \
-      -e "s|__PORT__|${PORT}|g" \
-      $( [ "$LANGUAGE" = "go" ] && echo "-e s|__MODULE_PATH__|${MODULE_PATH}|g" ) \
-      "$f"
-  fi
-done
+# Substitute placeholders portably in every UTF-8 text file. Binary files are
+# skipped, and values travel through the environment instead of shell code.
+FORGESTACK_STAGE_DIR="$STAGE_DIR" FORGESTACK_SERVICE_NAME="$SERVICE_NAME" FORGESTACK_PORT="$PORT" FORGESTACK_MODULE_PATH="$MODULE_PATH" python3 -I -c '
+import os
+from pathlib import Path
+root = Path(os.environ["FORGESTACK_STAGE_DIR"])
+values = {
+    "__SERVICE_NAME__": os.environ["FORGESTACK_SERVICE_NAME"],
+    "__PORT__": os.environ["FORGESTACK_PORT"],
+    "__MODULE_PATH__": os.environ["FORGESTACK_MODULE_PATH"],
+}
+for path in root.rglob("*"):
+    if not path.is_file():
+        continue
+    raw = path.read_bytes()
+    if b"\0" in raw:
+        continue
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        continue
+    for key, value in values.items():
+        text = text.replace(key, value)
+    path.write_bytes(text.encode("utf-8"))
+'
 
 # Record provenance (not required to run the generated project; purely
 # informational, see docs/VERSIONING.md).
-python3 -I -c "
-import json, datetime
-with open('$OUTPUT_DIR/template.json') as fh:
+FORGESTACK_STAGE_DIR="$STAGE_DIR" FORGESTACK_SERVICE_NAME="$SERVICE_NAME" FORGESTACK_FEATURES="$FEATURES" python3 -I -c "
+import json, os
+path = os.path.join(os.environ['FORGESTACK_STAGE_DIR'], 'template.json')
+with open(path) as fh:
     meta = json.load(fh)
-meta['generated_at'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
-meta['generated_service_name'] = '$SERVICE_NAME'
-meta['generated_features'] = '$FEATURES'.split(',')
-with open('$OUTPUT_DIR/template.json', 'w') as fh:
+meta['generated_service_name'] = os.environ['FORGESTACK_SERVICE_NAME']
+meta['generated_features'] = os.environ['FORGESTACK_FEATURES'].split(',')
+with open(path, 'w') as fh:
     json.dump(meta, fh, indent=2)
     fh.write('\n')
 "
 
-echo "Generated. See $OUTPUT_DIR/README.md to run it."
-
 if [ "$VALIDATE" -eq 1 ]; then
   echo "Validating generated project independently..."
   if [ "$LANGUAGE" = "go" ]; then
-    ( cd "$OUTPUT_DIR" && go build ./... && go vet ./... && go test ./... )
+    ( cd "$STAGE_DIR" && go build ./... && go vet ./... && go test ./... )
   else
-    ( cd "$OUTPUT_DIR" && python3 -m venv .venv && . .venv/bin/activate && pip install --quiet -r requirements-lock.txt pytest==9.0.3 httpx==0.28.1 && python -m pytest -q )
+    ( cd "$STAGE_DIR" && python3 -m venv .venv && . .venv/bin/activate && pip install --quiet -r requirements-lock.txt pytest==9.0.3 httpx==0.28.1 && python -m pytest -q )
   fi
   echo "Validation passed."
 fi
+
+mv "$STAGE_DIR" "$OUTPUT_DIR"
+STAGE_DIR=""
+trap - EXIT INT TERM
+
+echo "Generated. See $OUTPUT_DIR/README.md to run it."
