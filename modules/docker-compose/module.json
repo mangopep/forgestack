@@ -1,0 +1,14 @@
+{
+  "name": "docker-compose",
+  "version": "1.0.0",
+  "contract_version": "1.0.0",
+  "category": "deployment",
+  "provides": ["deployment.docker-compose"],
+  "configuration": {
+    "PORT": "host port; must be available on the local machine"
+  },
+  "deployment_targets": ["local"],
+  "health_checks": ["compose service health checks when declared by the application"],
+  "ownership": {"scope": "environment", "required_tags": ["forgestack.environment_id", "forgestack.owner"]},
+  "cleanup_behavior": "environment-owned-only"
+}

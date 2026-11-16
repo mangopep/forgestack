@@ -4,10 +4,10 @@ title: Platform overview
 
 # Platform overview
 
-**Status: implemented** for the Go application layer and its surrounding CI/governance;
-**planned** for the multi-language and infrastructure layers shown greyed below. This page
-does not claim those planned layers exist — see `docs/ROADMAP.md` for the module that builds
-each one.
+**Status: implemented** for the Go application layer, F1–F5 governance/security/templates,
+and the F6 local module resolver and playground lifecycle. Cloud infrastructure lifecycle,
+AI modules and production observability remain planned; this page does not claim those
+capabilities exist.
 
 ## Language-independent boundaries
 
@@ -18,6 +18,8 @@ flowchart TB
         Go["Go API (cmd/api, internal/modules/posts)"]
         Gov["Branch governance + CI (internal/branchpolicy, .github/workflows)"]
         Docs["Documentation-as-code (internal/docgen, website/)"]
+        Compose["Module manifests + compatibility resolver (cmd/modulecheck)"]
+        Playground["Local playground ownership + verified scoped cleanup"]
     end
     subgraph planned["Planned, not yet built"]
         direction TB
@@ -33,13 +35,15 @@ flowchart TB
     end
 
     Go --> shared
+    Compose --> Go
+    Playground --> Compose
     Py -.-> shared
     Node -.-> shared
     Workers -.-> shared
 
     classDef done fill:#2f855a,color:#fff,stroke:#22543d
     classDef todo fill:#718096,color:#fff,stroke:#4a5568,stroke-dasharray: 4 3
-    class Go,Gov,Docs done
+    class Go,Gov,Docs,Compose,Playground done
     class Py,Node,Workers,Obs todo
 ```
 
