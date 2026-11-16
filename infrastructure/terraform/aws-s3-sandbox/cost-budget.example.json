@@ -1,0 +1,7 @@
+{
+  "max_hourly_usd": 0.10,
+  "max_monthly_usd": 5.00,
+  "max_lifetime": "24h",
+  "max_estimate_age": "24h",
+  "approved_costly_resource_types": []
+}

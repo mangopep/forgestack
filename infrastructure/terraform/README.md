@@ -19,6 +19,33 @@ scanning.
   backend, use an encrypted, versioned, private state bucket, strict IAM, a separate key per
   environment and backend-native locking. Prefer short-lived OIDC credentials when a
   deployment workflow has been separately reviewed and authorized.
+- Pin the Terraform CLI with a *bounded* `required_version` (e.g. `">= 1.7.0, < 2.0.0"`, not
+  just a lower bound) and match it with an explicit `terraform_version` in
+  `hashicorp/setup-terraform` in CI — an unpinned "latest" CLI drifts silently between runs.
+  See `docs/adr/0007-terraform-module-versioning-and-change-governance.md`.
+
+## Module versioning (policy for the future module catalog)
+
+There is currently one root module (`aws-s3-sandbox`), not a reusable module catalog, so this
+section is policy for when that changes, not a description of something that exists:
+
+- A reusable module gets its own directory and SemVer git tag (`<name>/vX.Y.Z`). A consumer
+  references an exact tag or commit SHA — never a mutable branch.
+- A published tag is immutable *by policy*. **This is not yet enforced by a GitHub ruleset**
+  — the live branch rulesets protect `refs/heads/*` only, not `refs/tags/*`; see ADR 0007's
+  "future tag-protection requirement" for what adding real enforcement needs. A broken
+  release gets a new patch version, never a silent retag of an existing one.
+- A breaking change is a major version bump with a migration doc under `docs/migrations/` and
+  the same PR review every other change here gets — no separate approval process.
+
+### Proposing an infrastructure change (including as an external contributor)
+
+Open a PR against `develop`, same as any other ForgeStack change. It must pass `terraform fmt
+-check`, backend-free `init -lockfile=readonly`, `validate`, `scripts/test-terraform-safety-
+checks.sh`, and the Trivy config scan — all required status checks on the live branch
+rulesets, not optional. To add a new reusable module without affecting existing consumers,
+add a *new* module directory/tag rather than editing an already-published version's files;
+existing consumers pinned to an older tag are then structurally unaffected by your change.
 
 ## Resource ownership and cleanup
 

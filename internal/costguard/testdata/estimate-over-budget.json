@@ -1,0 +1,16 @@
+{
+  "generated_at": "2026-11-17T00:00:00Z",
+  "currency": "USD",
+  "resources": [
+    {
+      "address": "aws_nat_gateway.example[0]",
+      "resource_type": "aws_nat_gateway",
+      "hourly_cost": 0.045,
+      "monthly_cost": 32.85,
+      "usage_based": true,
+      "assumptions": ["ap-south-1 region", "no data-processing volume included"]
+    }
+  ],
+  "total_hourly": 0.045,
+  "total_monthly": 32.85
+}

@@ -12,6 +12,10 @@ bin/
 *.tfstate.*
 *.tfvars
 !.terraform.tfvars.example
+*.tfplan
+*.plan
+.terraformrc
+terraform.rc
 crash.log
 __pycache__/
 *.pyc

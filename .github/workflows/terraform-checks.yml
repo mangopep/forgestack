@@ -44,6 +44,16 @@ jobs:
           fi
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         if: steps.changed.outputs.relevant == 'true'
+        with:
+          # Pinned, not "latest" (setup-terraform's default): an unpinned
+          # CLI version drifts silently between CI runs and can change fmt/
+          # validate output or accept/reject different HCL without any
+          # change to this repo -- not reproducible. Matches
+          # aws-s3-sandbox/main.tf's required_version lower bound; see
+          # docs/adr/0007-terraform-module-versioning-and-change-governance.md
+          # for the upgrade policy (bump deliberately, re-verify, commit the
+          # bump in the same PR as any resulting fmt/lockfile changes).
+          terraform_version: "1.14.3"
       - name: Format
         if: steps.changed.outputs.relevant == 'true'
         run: terraform -chdir=infrastructure/terraform/aws-s3-sandbox fmt -check
@@ -53,6 +63,9 @@ jobs:
       - name: Validate
         if: steps.changed.outputs.relevant == 'true'
         run: terraform -chdir=infrastructure/terraform/aws-s3-sandbox validate
+      - name: Change-safety checks (checksum/version-mismatch rejection)
+        if: steps.changed.outputs.relevant == 'true'
+        run: bash scripts/test-terraform-safety-checks.sh
       - name: IaC security scan
         if: steps.changed.outputs.relevant == 'true'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0

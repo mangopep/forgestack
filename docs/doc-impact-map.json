@@ -203,6 +203,36 @@
       "area": "Trusted releases",
       "doc_path": "docs/RELEASES.md",
       "kind": "manual"
+    },
+    {
+      "pattern": "infrastructure/terraform/**",
+      "area": "Terraform module versioning and change governance",
+      "doc_path": "docs/adr/0007-terraform-module-versioning-and-change-governance.md",
+      "kind": "manual"
+    },
+    {
+      "pattern": "observability/**",
+      "area": "Local observability stack",
+      "doc_path": "docs/observability/README.md",
+      "kind": "manual"
+    },
+    {
+      "pattern": "internal/platform/telemetry/**/*.go",
+      "area": "OpenTelemetry tracing and Prometheus metrics",
+      "doc_path": "docs/observability/README.md",
+      "kind": "manual"
+    },
+    {
+      "pattern": "internal/costguard/**/*.go",
+      "area": "Cost Guard policy engine",
+      "doc_path": "docs/architecture/COST-GUARD.md",
+      "kind": "manual"
+    },
+    {
+      "pattern": "cmd/costguard/**/*.go",
+      "area": "Cost Guard policy engine",
+      "doc_path": "docs/architecture/COST-GUARD.md",
+      "kind": "manual"
     }
   ]
 }
