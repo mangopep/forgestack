@@ -272,9 +272,38 @@ vet` clean.
    possible; every entry is an explicit decision to skip this tool's own warning for that
    resource type.
 
+## A future requirement this does not yet meet: binding approval to the exact plan
+
+Nothing in this package today cryptographically ties a `Decision` to the specific Terraform
+plan it was computed from. `evaluate --live` reads a plan JSON file, produces an `Estimate`
+and a `Decision`, and exits — but there is no hash, no plan ID, no signature in that
+`Decision` connecting it back to the plan file's exact content. If this were ever wired into
+a real deployment pipeline (it is not, per the callout at the top of this document), that gap
+would matter: nothing today stops someone from getting plan A approved and then running
+`terraform apply` against a *different* plan B — a time-of-check-to-time-of-use gap, not a
+hypothetical one.
+
+**Before any real deployment integration is built, it must:**
+
+- Record a content hash (e.g. SHA-256 of the plan JSON bytes) in the `Decision` output, not
+  just in a side channel a deployment step might forget to check.
+- Require that same hash be recomputed from the plan file actually passed to `terraform
+  apply`, and refuse to apply if it doesn't match the hash a `Decision` approved.
+- Treat `TotalHourly`/`TotalMonthly` and the flagged-resource list the same way: they must be
+  demonstrably computed *from* the exact plan being applied, not merely "a plan that looked
+  similar when this ran a few minutes ago."
+- Bind the budget's `ApprovedCostlyResourceTypes` decision and the account/region the plan
+  targets together as part of the same hash or signature — approving a NAT gateway in one
+  account/region must not silently authorize the same resource type in a different one.
+
+This is recorded here as a named design requirement for the day a real deployment
+integration is built, not implemented now — implementing it without an actual deployment
+pipeline to integrate it into would be speculative, untestable new surface, not a bug fix.
+
 ## Next approval gate
 
 Real Infracost usage (an actual `--live` run with a real key), AWS Budgets/Cost
-Explorer/cost-allocation-tag integration, and a Terraform-aware cleanup/orphan-reconciliation
-controller each require either a human's own pricing-vendor account or real AWS access —
-each is its own separately-approved increment, not an automatic next step of this one.
+Explorer/cost-allocation-tag integration, a Terraform-aware cleanup/orphan-reconciliation
+controller, and the plan-binding requirement immediately above each require either a human's
+own pricing-vendor account, real AWS access, or an actual deployment pipeline to integrate
+into — each is its own separately-approved increment, not an automatic next step of this one.
