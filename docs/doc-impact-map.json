@@ -233,6 +233,18 @@
       "area": "Cost Guard policy engine",
       "doc_path": "docs/architecture/COST-GUARD.md",
       "kind": "manual"
+    },
+    {
+      "pattern": "internal/playground/**/*.go",
+      "area": "Playground lifecycle safety (expiration, cleanup controller, Docker reconciliation)",
+      "doc_path": "docs/architecture/PLAYGROUND-LIFECYCLE.md",
+      "kind": "manual"
+    },
+    {
+      "pattern": "cmd/playground/**/*.go",
+      "area": "Playground lifecycle safety (expiration, cleanup controller, Docker reconciliation)",
+      "doc_path": "docs/architecture/PLAYGROUND-LIFECYCLE.md",
+      "kind": "manual"
     }
   ]
 }

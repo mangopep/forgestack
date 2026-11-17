@@ -20,6 +20,22 @@ const maxTTL = 24 * time.Hour
 
 var safeID = regexp.MustCompile(`^env-[a-f0-9]{16}$`)
 
+// Status values an Environment can carry. These are the exact strings
+// already written to disk and asserted by this package's existing tests
+// (e.g. lifecycle_test.go checks literal "active"/"cleanup_incomplete"/
+// "verified_clean") -- naming them here doesn't change a single value,
+// it just gives the controller (controller.go) named constants instead of
+// repeating the magic strings, and adds the two states that previously had
+// no representation at all: StatusExpired and StatusCleanupPending.
+const (
+	StatusActive            = "active"
+	StatusExpired           = "expired"
+	StatusCleanupPending    = "cleanup_pending"
+	StatusCleanupIncomplete = "cleanup_incomplete"
+	StatusCleanupUnverified = "cleanup_unverified"
+	StatusVerifiedClean     = "verified_clean"
+)
+
 type Environment struct {
 	ID        string    `json:"id"`
 	Owner     string    `json:"owner"`
@@ -93,7 +109,7 @@ func (m Manager) Create(root, owner, mode string, ttl time.Duration, modules []s
 		return Environment{}, fmt.Errorf("generate environment ID: %w", err)
 	}
 	now := time.Now().UTC()
-	env := Environment{ID: "env-" + hex.EncodeToString(random[:]), Owner: owner, Mode: mode, Modules: append([]string(nil), modules...), CreatedAt: now, Status: "active"}
+	env := Environment{ID: "env-" + hex.EncodeToString(random[:]), Owner: owner, Mode: mode, Modules: append([]string(nil), modules...), CreatedAt: now, Status: StatusActive}
 	if mode == "playground" {
 		env.ExpiresAt = now.Add(ttl)
 	}
@@ -178,13 +194,13 @@ func (m Manager) removeOwnedResources(dir, metadataPath string, env Environment)
 			return Result{}, false, errors.New("owned resources path is not a real directory")
 		}
 		if err := m.removeAll(resources); err != nil {
-			env.Status = "cleanup_incomplete"
+			env.Status = StatusCleanupIncomplete
 			_ = writeMetadata(metadataPath, env)
 			return Result{Environment: env, Cleanup: "CLEANUP INCOMPLETE"}, false, fmt.Errorf("remove owned local resources: %w", err)
 		}
 	}
 	if _, err := os.Lstat(resources); !errors.Is(err, fs.ErrNotExist) {
-		env.Status = "cleanup_unverified"
+		env.Status = StatusCleanupUnverified
 		_ = writeMetadata(metadataPath, env)
 		return Result{Environment: env, Cleanup: "CLEANUP UNVERIFIED"}, false, errors.New("owned resources remain or cannot be verified absent")
 	}
@@ -198,10 +214,10 @@ func finalizeCleanup(rootPath, id, metadataPath string, env Environment, entries
 	if err != nil {
 		return Result{Environment: env, Cleanup: "CLEANUP UNVERIFIED"}, fmt.Errorf("verify environment inventory: %w", err)
 	}
-	if !sameSiblingInventory(entriesBefore, entriesAfter, id) {
-		return Result{Environment: env, Cleanup: "CLEANUP UNVERIFIED"}, errors.New("environment inventory changed outside the owned resource directory")
+	if !priorSiblingsStillPresent(entriesBefore, entriesAfter, id) {
+		return Result{Environment: env, Cleanup: "CLEANUP UNVERIFIED"}, errors.New("a sibling environment present before cleanup is missing or changed afterward")
 	}
-	env.Status = "verified_clean"
+	env.Status = StatusVerifiedClean
 	if err := writeMetadata(metadataPath, env); err != nil {
 		return Result{Environment: env, Cleanup: "CLEANUP UNVERIFIED"}, fmt.Errorf("persist cleanup evidence: %w", err)
 	}
@@ -214,6 +230,20 @@ func finalizeCleanup(rootPath, id, metadataPath string, env Environment, entries
 
 // Cleanup removes only the verified environment's resources directory. It retains
 // the ownership record as evidence and never traverses a caller-selected resource path.
+//
+// Everything from the ownership read onward runs under withEnvironmentLock,
+// so a concurrent call for the same id -- from another goroutine or an
+// entirely separate process, e.g. a scheduled cleanup-due run overlapping a
+// human-invoked `playground cleanup` -- cannot interleave its own read and
+// write with this one. Without that, a caller whose own attempt genuinely
+// fails (for a reason unrelated to whether the resources are actually
+// still there) can persist CLEANUP_INCOMPLETE *after* a concurrent caller
+// has already removed everything and persisted VERIFIED_CLEAN, silently
+// regressing a true success to a stale failure. Serializing the whole
+// read-decide-write cycle rules that out: whichever caller runs second
+// always re-reads fresh state under the same lock, so by the time it acts,
+// "already absent" is exactly what it sees, and it never calls removeAll
+// at all.
 func (m Manager) Cleanup(root, id, owner string) (Result, error) {
 	if !safeID.MatchString(id) {
 		return Result{}, errors.New("invalid environment ID")
@@ -221,7 +251,7 @@ func (m Manager) Cleanup(root, id, owner string) (Result, error) {
 	if strings.TrimSpace(owner) == "" {
 		return Result{}, errors.New("owner is required")
 	}
-	rootPath, entriesBefore, err := cleanupRootState(root)
+	rootPath, err := filepath.Abs(root)
 	if err != nil {
 		return Result{}, err
 	}
@@ -237,34 +267,91 @@ func (m Manager) Cleanup(root, id, owner string) (Result, error) {
 		return Result{}, errors.New("environment path is not a real directory")
 	}
 	metadataPath := filepath.Join(dir, "environment.json")
-	env, err := loadOwnedEnvironment(metadataPath, id, owner)
-	if err != nil {
-		return Result{}, err
-	}
-	removed, alreadyAbsent, err := m.removeOwnedResources(dir, metadataPath, env)
-	if err != nil {
-		return removed, err
-	}
-	return finalizeCleanup(rootPath, id, metadataPath, removed.Environment, entriesBefore, alreadyAbsent)
+
+	var result Result
+	err = withEnvironmentLock(dir, func() error {
+		lockedRootPath, entriesBefore, lockErr := cleanupRootState(root)
+		if lockErr != nil {
+			return lockErr
+		}
+		env, lockErr := loadOwnedEnvironment(metadataPath, id, owner)
+		if lockErr != nil {
+			return lockErr
+		}
+		removed, alreadyAbsent, lockErr := m.removeOwnedResources(dir, metadataPath, env)
+		if lockErr != nil {
+			result = removed
+			return lockErr
+		}
+		result, lockErr = finalizeCleanup(lockedRootPath, id, metadataPath, removed.Environment, entriesBefore, alreadyAbsent)
+		return lockErr
+	})
+	return result, err
 }
 
-func sameSiblingInventory(before, after []os.DirEntry, id string) bool {
-	toNames := func(entries []os.DirEntry) []string {
-		var names []string
-		for _, entry := range entries {
-			if entry.Name() != id {
-				names = append(names, entry.Name())
-			}
+// ListEnvironments reads every environment.json directly under root and
+// returns the Environment it describes, skipping (not failing on) any
+// sibling entry that isn't a safeID-shaped directory with a readable,
+// well-formed ownership record -- a controller scanning for expired
+// environments must not abort entirely because one neighboring entry is
+// unrelated or corrupted. Read-only: never creates, modifies, or removes
+// anything.
+func ListEnvironments(root string) ([]Environment, error) {
+	rootPath, err := filepath.Abs(root)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(rootPath)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
 		}
-		sort.Strings(names)
-		return names
+		return nil, fmt.Errorf("list environment root: %w", err)
 	}
-	a, b := toNames(before), toNames(after)
-	if len(a) != len(b) {
-		return false
+	var envs []Environment
+	for _, entry := range entries {
+		if !entry.IsDir() || !safeID.MatchString(entry.Name()) {
+			continue
+		}
+		metadataPath := filepath.Join(rootPath, entry.Name(), "environment.json")
+		data, readErr := os.ReadFile(metadataPath) //nolint:gosec // G304: path is built from a regex-validated environment ID under an operator-supplied root, not arbitrary input
+		if readErr != nil {
+			continue
+		}
+		var env Environment
+		if jsonErr := json.Unmarshal(data, &env); jsonErr != nil {
+			continue
+		}
+		if env.ID != entry.Name() {
+			continue
+		}
+		envs = append(envs, env)
 	}
-	for i := range a {
-		if a[i] != b[i] {
+	sort.Slice(envs, func(i, j int) bool { return envs[i].ID < envs[j].ID })
+	return envs, nil
+}
+
+// priorSiblingsStillPresent reports whether every root-level entry that
+// existed in before (other than id, this environment's own directory)
+// still exists in after. It deliberately does not require the reverse: a
+// brand-new sibling appearing is not collateral damage from this
+// environment's cleanup, it's simply a concurrent Manager.Create for a
+// different, independently-generated random ID landing in the same
+// window -- entirely ownership-scoped to environments this snapshot
+// pair already knew about, never to anything created afterward. What
+// this must still catch, and does, is any PRIOR sibling going missing or
+// being altered, which is the actual thing cleanup must never cause.
+func priorSiblingsStillPresent(before, after []os.DirEntry, id string) bool {
+	afterByName := make(map[string]os.DirEntry, len(after))
+	for _, entry := range after {
+		afterByName[entry.Name()] = entry
+	}
+	for _, entry := range before {
+		if entry.Name() == id {
+			continue
+		}
+		afterEntry, stillPresent := afterByName[entry.Name()]
+		if !stillPresent || afterEntry.IsDir() != entry.IsDir() {
 			return false
 		}
 	}
@@ -276,9 +363,34 @@ func writeMetadata(path string, env Environment) error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(data, '\n'), 0600); err != nil {
+	return atomicWriteFile(path, append(data, '\n'))
+}
+
+// atomicWriteFile writes data to path via a uniquely-named temporary file
+// in the same directory, then renames it into place. The temp name must be
+// unique per call -- a single fixed "<path>.tmp" is unsafe under concurrent
+// writers: two callers racing to write the same path would both write to
+// and rename the identical temp file, and whichever rename runs second
+// fails with "no such file or directory" because the first rename already
+// consumed it. os.CreateTemp's randomized suffix rules that out.
+func atomicWriteFile(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp.*")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	return nil
 }

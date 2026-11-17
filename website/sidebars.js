@@ -29,6 +29,7 @@ const sidebars = {
         'architecture/PLATFORM-OVERVIEW',
         'architecture/F3-APPLICATION-FOUNDATION',
         'architecture/F6-LOCAL-FOUNDATION',
+        'architecture/PLAYGROUND-LIFECYCLE',
         'architecture/PRODUCTION-GRADE-STANDARDS',
         'architecture/COST-GUARD',
         'architecture/posts-module',
