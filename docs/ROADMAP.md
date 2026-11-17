@@ -7,10 +7,12 @@ Every lab follows: **understand -> build -> test -> break -> observe -> diagnose
 - **F1–F5:** implemented; see the implementation status table in `README.md` and their
   architecture decision records.
 - **F6 local foundation:** versioned module manifests, capability/provider-version
-  validation, deterministic template generation, and a local ownership/TTL/cleanup flow
-  are implemented and verified on the dedicated F6 feature branch. AWS adapters,
-  Terraform remote state, automatic expiry reconciliation and cloud cleanup remain
-  unimplemented. See `docs/architecture/F6-LOCAL-FOUNDATION.md`.
+  validation, deterministic template generation, and a local ownership/TTL/cleanup flow --
+  including automatic local expiration, bounded-retry cleanup and an opt-in cleanup
+  worker -- are implemented and verified on `develop`, not yet promoted to `staging`/`main`.
+  AWS adapters, Terraform remote state, *cloud-side* automatic expiry reconciliation and
+  cloud cleanup remain unimplemented. See `docs/architecture/F6-LOCAL-FOUNDATION.md` and
+  `docs/architecture/PLAYGROUND-LIFECYCLE.md`.
 - **F7 onward:** not started. AI, MCP, RAG, observability and Kubernetes remain future
   module categories; no empty placeholder modules are included.
 
