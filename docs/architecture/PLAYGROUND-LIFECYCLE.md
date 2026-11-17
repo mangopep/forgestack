@@ -79,9 +79,67 @@ adds is strict, label-scoped tracking and reconciliation:
   then calls `Reconcile` again to independently confirm — the Docker-resource equivalent of
   `removeOwnedResources`/`finalizeCleanup`'s existing local-filesystem pattern.
 
+## The worker (`internal/playground/worker.go`, `playground worker`)
+
+`Worker` is a minimal, opt-in scheduler for the calls above — it adds no new state and no new
+safety logic of its own. Each pass just calls `Controller.ExpireDue` then `Controller.CleanupDue`
+(which itself does Docker reconciliation when a `Docker` client is configured), on a timer. That
+is deliberate: the worker's entire job is deciding *when* to call code this package already knows
+how to call safely, never re-deriving safety from scratch.
+
+**Start.**
+
+```bash
+playground worker --root .forgestack/environments --interval 5m
+playground worker --root .forgestack/environments --interval 5m --docker   # also reconciles tracked Docker resources
+```
+
+It is **not** started by `create`, `cleanup`, or any other subcommand — a human or a process
+supervisor (systemd, a `Procfile`, a long-running terminal) starts it explicitly, once, per root
+directory it should manage. Running zero workers is the default and entirely supported: every
+other subcommand (`expire-due`, `cleanup-due`) still works standalone, by hand or from your own
+cron, exactly as before.
+
+**Stop.** Ctrl-C (`SIGINT`) or `kill <pid>` (`SIGTERM`, what a service manager sends by default).
+Both cancel the worker's context; `Worker.Run` finishes its current pass — never half-applied —
+and returns. There is no separate stop command or stop file.
+
+**Inspect.** The worker writes one line per pass to stderr (`playground worker: pass complete:
+expired=N cleanup_attempted=N cleanup_unverified_or_incomplete=N`) and one line per pass-level
+error. Beyond that, inspect exactly what you'd inspect without a worker running at all: `cat
+<root>/<id>/environment.json` for one environment's current status, or `playground reconcile
+--root <root> --id <id>` for live Docker drift. The worker has no separate state to query — if
+you can read an environment's `environment.json`, you've seen everything the worker itself knows
+about it.
+
+**Recover.** Independent of whatever process created a playground, by design: start a worker
+against an existing root in a brand-new process (a different terminal, after a reboot, from a
+different host sharing the same filesystem) and it resumes from exactly what's on disk, with no
+in-memory handoff required — the same guarantee `Controller.CleanupDue` already has
+(`TestCleanupDueAfterSimulatedRestartUsesOnlyPersistedState`), now proven through the worker's
+own loop by `TestWorkerResumesAfterSimulatedRestart`. If the worker process itself is killed
+(not asked to stop), whatever it was doing picks up on the next worker's first pass exactly as
+`CleanupDue` already recovers from any interruption — see "States" above.
+
+**Overlapping instances.** Running two worker processes against the same root at the same time
+is never corrupting: every individual operation is still serialized per-environment by the same
+`withEnvironmentLock` from the "Concurrency and locking" section below, which this worker reuses
+rather than re-implementing — `TestOverlappingWorkerInstancesConvergeWithoutCorruption` proves
+this empirically, including with one of the two workers hitting an asymmetric, state-independent
+injected failure. It is not the most *efficient* way to run two workers (both will redundantly
+scan and attempt the same due environments), but it is safe, and "safe, if wasteful" was judged
+the right trade-off over adding a second, worker-level locking primitive the review didn't ask
+for and this package doesn't otherwise need.
+
+**Limitation, stated plainly.** `Worker.Run` only returns after its current pass finishes. If
+that pass is blocked acquiring a per-environment lock held by another process, cancellation does
+not interrupt that wait — `syscall.Flock`'s blocking acquisition has no context support. This
+mirrors `Manager.Cleanup`'s existing behavior unchanged; in practice the wait is bounded by
+whatever bounded, local-filesystem work the other lock holder is doing, never unbounded.
+
 ## Test evidence
 
-31 tests in `internal/playground`, `go test -race` clean, `golangci-lint` 0 issues. The 5
+37 tests in `internal/playground`, `go test -race` clean, `golangci-lint` 0 issues. The 5
 pre-existing tests are unchanged and still pass. New:
 
 | Requirement | Test(s) |
@@ -104,13 +162,24 @@ pre-existing tests are unchanged and still pass. New:
 | Sibling-inventory false positive closed (deterministic repro) | `TestConcurrentCreateDuringCleanupNeverCausesFalseUnverified` |
 | Sibling check still catches real collateral damage | `TestPriorSiblingsStillPresentStillDetectsRealCollateralDamage` |
 | Cross-environment isolation under concurrency (create/track/delete) | `TestConcurrentCleanupOfDifferentEnvironmentNeverAffectsThisOnesResult`, `TestConcurrentTrackDockerResourceOnDifferentEnvironmentNeverAffectsThisOnesResult` |
+| Worker: injected-tick loop, no real timer | `TestWorkerRunsAnImmediatePassThenOnePerTick` |
+| Worker: restart recovery, independent of the creating process | `TestWorkerResumesAfterSimulatedRestart` |
+| Worker: never touches product/unrelated playgrounds | `TestWorkerNeverTouchesProductOrUnrelatedPlaygrounds` |
+| Worker: Docker-unavailable never reported as success | `TestWorkerReportsUnverifiedNotSuccessWhenDockerIsUnavailable` |
+| Worker: overlapping instances, asymmetric failure | `TestOverlappingWorkerInstancesConvergeWithoutCorruption` |
+| Worker: real Docker end-to-end (skips if daemon unreachable) | `TestWorkerRealDockerEndToEnd` |
 
 **End-to-end CLI evidence** (`cmd/playground`, run directly, not just unit-tested): `create`
 with a 2-second TTL → `expire-due` → `cleanup-due` reaches `verified_clean`; separately,
 `track-docker` against a real `docker network create`d network, then `reconcile` correctly
 shows it `tracked`+`present` with no drift; then `expire-due` + `cleanup-due --docker` against
 that same setup reached `verified_clean` and an independent `docker network ls` confirmed the
-network actually gone.
+network actually gone. For the worker specifically: `playground worker --root ... --interval 2s`
+started in the background, left running across two full ticks (confirmed via its own stderr
+pass-complete lines), then stopped cleanly with `SIGINT` and exited; separately, the same
+sequence with `--docker` against a real `docker network create`d, tracked network reached
+`verified_clean` and an independent `docker network ls` confirmed that network actually gone
+too, run by the worker's own loop rather than a direct `cleanup-due` invocation.
 
 ## Limitations (reported honestly, not hidden)
 
@@ -122,8 +191,10 @@ network actually gone.
   across environments by design, never this package's business to remove) and not any other
   Docker object kind.
 - `CleanupDue`'s bounded retries are synchronous and sequential per environment within one
-  call; this is a library a caller invokes (by hand, or from a scheduler/cron the caller sets
-  up), not a standalone daemon process. No daemon/scheduler is implemented here.
+  call. `Worker` (see "The worker" above) is the opt-in standalone-process form of this; it is
+  still just a timer around `ExpireDue`/`CleanupDue`, not a separate scheduling engine, and
+  running it is optional -- every subcommand still works invoked by hand or from your own
+  cron/systemd timer instead.
 - Still true from `F6-LOCAL-FOUNDATION.md`: no remote state, no AWS adapter, no cost-reconciled
   cleanup against real cloud billing. Cost Guard's own design-only section on this
   (`docs/architecture/COST-GUARD.md`) is the closest existing documentation of what an AWS
