@@ -91,6 +91,36 @@ policy this repo commits to, for the day a second consumer or a child-module cat
   genuinely broken release should still get a new patch version rather than a retag, as a
   matter of policy now; the ruleset is what would make that the only option, later.
 
+  **Proposed minimal ruleset (specification only — not created, requires explicit
+  approval):**
+
+  ```json
+  {
+    "name": "release-tag-protection",
+    "target": "tag",
+    "enforcement": "active",
+    "conditions": { "ref_name": { "include": ["refs/tags/v*"], "exclude": [] } },
+    "rules": [{ "type": "update" }, { "type": "deletion" }],
+    "bypass_actors": []
+  }
+  ```
+
+  Minimal on purpose: only `update` (force-move) and `deletion` are blocked, matching
+  exactly the gap the audit above found — same shape as the three existing branch
+  rulesets' `non_fast_forward`/`deletion` rules, just targeted at `refs/tags/v*` instead of
+  a branch. No `required_status_checks` or `pull_request` rule is proposed for tags:
+  `release.yml`'s own `validate-tag` job already re-derives everything a tag-level status
+  check could provide (ancestry, SemVer validity, duplicate-release refusal) *after* the
+  tag is pushed, so duplicating that as a pre-push gate would be redundant, not safer.
+
+  **Impact on `release.yml`: none.** The workflow only *reacts* to a tag push
+  (`on: push: tags: ['v*']`) — it never itself updates or deletes a tag, and creating a
+  brand-new tag (`git push origin vX.Y.Z` for a version that doesn't exist yet) is
+  unaffected by an `update`/`deletion` block on existing refs. The only behavior this
+  ruleset would change is exactly the intended one: a second `git push --force` or
+  `git push --delete` against an *existing* `v*` tag would be rejected by GitHub itself,
+  the same way a force-push to `main` already is today.
+
 ### 6. Backward compatibility within minor/patch; approval + migration docs for breaking changes
 
 **Policy-only — not applicable yet**, same reasoning as above: nothing currently consumes a
