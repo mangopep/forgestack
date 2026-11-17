@@ -1,0 +1,13 @@
+{
+  "generated_at": "2026-11-17T00:00:00Z",
+  "currency": "USD",
+  "resources": [
+    {
+      "address": "aws_sagemaker_notebook_instance.example[0]",
+      "resource_type": "aws_sagemaker_notebook_instance",
+      "unsupported_note": "no price mapping exists for this resource type in the pricing source used"
+    }
+  ],
+  "total_hourly": null,
+  "total_monthly": null
+}

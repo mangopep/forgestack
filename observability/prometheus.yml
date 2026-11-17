@@ -1,0 +1,14 @@
+# Scrapes a ForgeStack-generated Go service's real /metrics endpoint
+# directly -- no collector hop needed for metrics, since
+# internal/platform/telemetry already serves standard Prometheus text
+# exposition format. host.docker.internal lets this reach a service you're
+# running directly on your Mac (go run ./cmd/api); if you instead run the
+# service as a container on this same compose network, change the target
+# to that container's name:port (see observability/README.md).
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: forgestack-service
+    static_configs:
+      - targets: ["host.docker.internal:8080"]

@@ -1,0 +1,24 @@
+# Minimal single-binary Tempo config: local disk storage, no object store,
+# no multi-tenant setup -- correct for a local dev stack, not for production
+# trace retention at scale.
+server:
+  http_listen_port: 3200
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/traces
+    wal:
+      path: /var/tempo/wal
+
+compactor:
+  compaction:
+    block_retention: 24h

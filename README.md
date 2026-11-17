@@ -146,7 +146,8 @@ See [`docs/COMMANDS.md`](docs/COMMANDS.md) for every command this repository use
 | F3 | Go + Python application foundation, shared service contract | **Implemented**, live on `main` (`docs/adr/0004-f3-application-foundation.md`) |
 | F4 | Security & supply-chain foundation (this document's table above) | **Implemented and live on `main`**, including a verified live run of keyless signing + GitHub-native attestation (`docs/adr/0005-f4-security-supply-chain.md`) |
 | F5 | Reusable Go/Python templates, SemVer policy, trusted-release pipeline | **Implemented and live on `main`**, including a verified successful live release (`v0.1.2`) — signed, attested, SBOM'd, and published as a GitHub Release. Two earlier live attempts (`v0.1.0`, `v0.1.1`) failed and were fixed first; see `docs/RELEASES.md` for the full history (`docs/adr/0006-f5-templates-releases.md`) |
-| F6–F20 | Future phases (not yet scoped in detail; see `docs/ROADMAP.md`) | **Not started** |
+| F6 | Versioned module manifests, capability/version compatibility checks, deterministic generation, a scoped local playground lifecycle with automatic expiration/cleanup, and an opt-in cleanup worker | **Implemented and verified on `develop`**, not yet on `main`; local only — no cloud lifecycle or automatic *cloud* expiry controller (`docs/architecture/F6-LOCAL-FOUNDATION.md`, `docs/architecture/PLAYGROUND-LIFECYCLE.md`) |
+| F7–F20 | Future platform phases | **Not started**; see `docs/ROADMAP.md` |
 | Audit & Trust module | Evidence-collection expansion (infra/access/incident/backup), later a customer-facing Trust Center | **Roadmap only**, unscheduled against a specific F-number — see `docs/ROADMAP.md`'s "Audit & Trust" module |
 
 ForgeStack never self-issues a certification. If an independent audit is ever obtained for a
@@ -164,6 +165,12 @@ scope, issuance/expiry dates) — never granted by this repository's own tooling
   its own nested `go.mod`/`pyproject.toml` so they're never part of this repository's own
   build
 - `scripts/new-service.sh`: generates a new, standalone project from a template
+- `cmd/modulecheck`, `modules/`: versioned capability contracts and compatibility resolver
+- `cmd/playground`: local-only environment ownership, automatic expiration/cleanup, scoped
+  cleanup, Docker resource reconciliation, and an opt-in `worker` entrypoint that runs the
+  above on a timer — see `docs/architecture/PLAYGROUND-LIFECYCLE.md`
+- `internal/playground`: lifecycle implementation, cross-process locking, and cleanup
+  verification tests
 - `cmd/docgen`: generates `docs/generated/*` directly from source; CI fails if these drift
 - `compose.yaml`, `Dockerfile`, `apps/python-api/Dockerfile`: hardened local containers
   (digest-pinned, non-root, read-only, zero Linux capabilities)

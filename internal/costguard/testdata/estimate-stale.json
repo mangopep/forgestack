@@ -1,0 +1,14 @@
+{
+  "generated_at": "2020-01-01T00:00:00Z",
+  "currency": "USD",
+  "resources": [
+    {
+      "address": "aws_s3_bucket.lab[0]",
+      "resource_type": "aws_s3_bucket",
+      "hourly_cost": 0.0,
+      "monthly_cost": 0.02
+    }
+  ],
+  "total_hourly": 0.0,
+  "total_monthly": 0.02
+}
