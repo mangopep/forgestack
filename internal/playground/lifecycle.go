@@ -230,6 +230,20 @@ func finalizeCleanup(rootPath, id, metadataPath string, env Environment, entries
 
 // Cleanup removes only the verified environment's resources directory. It retains
 // the ownership record as evidence and never traverses a caller-selected resource path.
+//
+// Everything from the ownership read onward runs under withEnvironmentLock,
+// so a concurrent call for the same id -- from another goroutine or an
+// entirely separate process, e.g. a scheduled cleanup-due run overlapping a
+// human-invoked `playground cleanup` -- cannot interleave its own read and
+// write with this one. Without that, a caller whose own attempt genuinely
+// fails (for a reason unrelated to whether the resources are actually
+// still there) can persist CLEANUP_INCOMPLETE *after* a concurrent caller
+// has already removed everything and persisted VERIFIED_CLEAN, silently
+// regressing a true success to a stale failure. Serializing the whole
+// read-decide-write cycle rules that out: whichever caller runs second
+// always re-reads fresh state under the same lock, so by the time it acts,
+// "already absent" is exactly what it sees, and it never calls removeAll
+// at all.
 func (m Manager) Cleanup(root, id, owner string) (Result, error) {
 	if !safeID.MatchString(id) {
 		return Result{}, errors.New("invalid environment ID")
@@ -237,7 +251,7 @@ func (m Manager) Cleanup(root, id, owner string) (Result, error) {
 	if strings.TrimSpace(owner) == "" {
 		return Result{}, errors.New("owner is required")
 	}
-	rootPath, entriesBefore, err := cleanupRootState(root)
+	rootPath, err := filepath.Abs(root)
 	if err != nil {
 		return Result{}, err
 	}
@@ -253,15 +267,26 @@ func (m Manager) Cleanup(root, id, owner string) (Result, error) {
 		return Result{}, errors.New("environment path is not a real directory")
 	}
 	metadataPath := filepath.Join(dir, "environment.json")
-	env, err := loadOwnedEnvironment(metadataPath, id, owner)
-	if err != nil {
-		return Result{}, err
-	}
-	removed, alreadyAbsent, err := m.removeOwnedResources(dir, metadataPath, env)
-	if err != nil {
-		return removed, err
-	}
-	return finalizeCleanup(rootPath, id, metadataPath, removed.Environment, entriesBefore, alreadyAbsent)
+
+	var result Result
+	err = withEnvironmentLock(dir, func() error {
+		lockedRootPath, entriesBefore, lockErr := cleanupRootState(root)
+		if lockErr != nil {
+			return lockErr
+		}
+		env, lockErr := loadOwnedEnvironment(metadataPath, id, owner)
+		if lockErr != nil {
+			return lockErr
+		}
+		removed, alreadyAbsent, lockErr := m.removeOwnedResources(dir, metadataPath, env)
+		if lockErr != nil {
+			result = removed
+			return lockErr
+		}
+		result, lockErr = finalizeCleanup(lockedRootPath, id, metadataPath, removed.Environment, entriesBefore, alreadyAbsent)
+		return lockErr
+	})
+	return result, err
 }
 
 // ListEnvironments reads every environment.json directly under root and
@@ -334,9 +359,34 @@ func writeMetadata(path string, env Environment) error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(data, '\n'), 0600); err != nil {
+	return atomicWriteFile(path, append(data, '\n'))
+}
+
+// atomicWriteFile writes data to path via a uniquely-named temporary file
+// in the same directory, then renames it into place. The temp name must be
+// unique per call -- a single fixed "<path>.tmp" is unsafe under concurrent
+// writers: two callers racing to write the same path would both write to
+// and rename the identical temp file, and whichever rename runs second
+// fails with "no such file or directory" because the first rename already
+// consumed it. os.CreateTemp's randomized suffix rules that out.
+func atomicWriteFile(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp.*")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	return nil
 }

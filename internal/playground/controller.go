@@ -141,13 +141,32 @@ func (c Controller) cleanupOne(ctx context.Context, root string, env Environment
 	if c.Docker == nil {
 		return result, nil
 	}
-	rec, dockerErr := RemoveTrackedDockerResources(ctx, c.Docker, root, env.ID)
-	if dockerErr != nil || !rec.Clean() {
-		downgraded := result.Environment
-		downgraded.Status = StatusCleanupUnverified
-		if persistErr := c.persist(root, downgraded); persistErr != nil && dockerErr == nil {
-			dockerErr = persistErr
+	dir, err := environmentDir(root, env.ID)
+	if err != nil {
+		return result, err
+	}
+	// Locked for the same reason Manager.Cleanup is: without it, two
+	// concurrent cleanupOne calls for the same environment could each
+	// independently attempt `docker rm` on the same resource and race on
+	// which one's downgrade-or-not write lands last.
+	var rec Reconciliation
+	var dockerErr error
+	var downgraded Environment
+	lockErr := withEnvironmentLock(dir, func() error {
+		rec, dockerErr = RemoveTrackedDockerResources(ctx, c.Docker, root, env.ID)
+		if dockerErr != nil || !rec.Clean() {
+			downgraded = result.Environment
+			downgraded.Status = StatusCleanupUnverified
+			if persistErr := c.persist(root, downgraded); persistErr != nil && dockerErr == nil {
+				dockerErr = persistErr
+			}
 		}
+		return nil
+	})
+	if lockErr != nil {
+		return result, lockErr
+	}
+	if dockerErr != nil || !rec.Clean() {
 		result.Environment = downgraded
 		result.Cleanup = "CLEANUP UNVERIFIED (docker resources remain or could not be checked)"
 		if dockerErr == nil {
@@ -184,11 +203,19 @@ func (c Controller) retryLocalCleanup(root, id, owner string) (Result, error) {
 }
 
 func (c Controller) persist(root string, env Environment) error {
-	rootPath, err := filepath.Abs(root)
+	dir, err := environmentDir(root, env.ID)
 	if err != nil {
 		return err
 	}
-	return writeMetadata(filepath.Join(rootPath, env.ID, "environment.json"), env)
+	return writeMetadata(filepath.Join(dir, "environment.json"), env)
+}
+
+func environmentDir(root, id string) (string, error) {
+	rootPath, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(rootPath, id), nil
 }
 
 var errDockerResourcesRemain = dockerResourcesRemainError{}

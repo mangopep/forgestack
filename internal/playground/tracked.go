@@ -28,6 +28,13 @@ func trackedResourcesPath(dir string) string { return filepath.Join(dir, "docker
 // environment it doesn't own. Appends; does not deduplicate beyond exact
 // (kind, ref) match, since re-tracking the same resource twice is harmless
 // and simpler than requiring every caller to check first.
+//
+// The whole read-modify-write runs under withEnvironmentLock (the same
+// per-environment lock Cleanup uses): without it, two concurrent calls
+// tracking two different resources for the same environment could both
+// load the same "existing" list, each append their one resource, and
+// whichever write happens last would silently discard the other's --
+// a lost update, not merely a races-but-converges case like Cleanup's.
 func (m Manager) TrackDockerResource(root, id, owner string, res TrackedDockerResource) error {
 	if !safeID.MatchString(id) {
 		return errors.New("invalid environment ID")
@@ -38,20 +45,22 @@ func (m Manager) TrackDockerResource(root, id, owner string, res TrackedDockerRe
 	}
 	dir := filepath.Join(rootPath, id)
 	metadataPath := filepath.Join(dir, "environment.json")
-	if _, err := loadOwnedEnvironment(metadataPath, id, owner); err != nil {
-		return err
-	}
-	existing, err := loadTrackedDockerResources(dir)
-	if err != nil {
-		return err
-	}
-	for _, r := range existing {
-		if r.Kind == res.Kind && r.Ref == res.Ref {
-			return nil
+	return withEnvironmentLock(dir, func() error {
+		if _, err := loadOwnedEnvironment(metadataPath, id, owner); err != nil {
+			return err
 		}
-	}
-	existing = append(existing, res)
-	return writeTrackedDockerResources(dir, existing)
+		existing, err := loadTrackedDockerResources(dir)
+		if err != nil {
+			return err
+		}
+		for _, r := range existing {
+			if r.Kind == res.Kind && r.Ref == res.Ref {
+				return nil
+			}
+		}
+		existing = append(existing, res)
+		return writeTrackedDockerResources(dir, existing)
+	})
 }
 
 func loadTrackedDockerResources(dir string) ([]TrackedDockerResource, error) {
@@ -74,10 +83,5 @@ func writeTrackedDockerResources(dir string, resources []TrackedDockerResource) 
 	if err != nil {
 		return err
 	}
-	path := trackedResourcesPath(dir)
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(data, '\n'), 0600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return atomicWriteFile(trackedResourcesPath(dir), append(data, '\n'))
 }
