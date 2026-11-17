@@ -10,8 +10,15 @@ name: Trusted Release
 # context, never from PR-triggered code, and now only after the tag has
 # been proven to point at main's own history.
 #
-# NOT YET VERIFIED end-to-end (requires a real tag push, which this phase
-# does not do -- see docs/adr/0006-f5-templates-releases.md).
+# This pipeline has run live three times (v0.1.0, v0.1.1, v0.1.2) and
+# succeeded in full on v0.1.2 -- every step, independently re-verified
+# after the run (cosign verify, gh attestation verify, fresh image pulls
+# reporting the real version), not just the job's own report. See
+# docs/RELEASES.md's "v0.1.2 -- verified successful release" for the full
+# evidence. That proves this exact pipeline, unchanged since; it does not
+# by itself prove any *future* tag's run -- each new tag still needs its
+# own independent post-run verification, same as v0.1.2 got, not assumed
+# from this history.
 on:
   push:
     tags:
@@ -177,8 +184,7 @@ jobs:
           done
 
       - name: Log in to GHCR
-        # NOT YET VERIFIED -- requires a live tag push with registry
-        # permission, which this phase does not perform.
+        # Verified live on v0.1.2's successful run -- see docs/RELEASES.md.
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       - name: "Push images (immutable: tag matches the validated release version, never :latest alone)"
@@ -252,9 +258,9 @@ jobs:
         # attested, its source commit matches this run's `github.sha`, and
         # its workflow ref matches this exact tag -- rather than trusting
         # that the action did the right thing without checking.
-        # NOT YET RUNTIME-VERIFIED end-to-end (requires a real tag push
-        # with a successful attestation, which this phase of work is not
-        # authorized to perform -- see docs/RELEASES.md).
+        # Verified live on v0.1.2's successful run for both images -- see
+        # docs/RELEASES.md's "Independent verification performed after
+        # the run" for the exact gh attestation verify output.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
