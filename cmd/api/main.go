@@ -10,10 +10,20 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mangopep/forgestack/internal/platform/buildinfo"
 	"github.com/mangopep/forgestack/internal/platform/router"
+	"github.com/mangopep/forgestack/internal/platform/telemetry"
 )
 
 func main() {
+	setupCtx, cancelSetup := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownTelemetry, err := telemetry.SetupFromEnv(setupCtx, buildinfo.Name, buildinfo.Version)
+	cancelSetup()
+	if err != nil {
+		slog.Error("telemetry setup failed", "error", err)
+		os.Exit(1)
+	}
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -42,5 +52,8 @@ func main() {
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		slog.Error("shutdown failed", "error", err)
+	}
+	if err := shutdownTelemetry(shutdownCtx); err != nil {
+		slog.Error("telemetry shutdown failed", "error", err)
 	}
 }

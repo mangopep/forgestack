@@ -3,6 +3,7 @@ package router
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -22,5 +23,24 @@ func TestReadyz(t *testing.T) {
 	New().ServeHTTP(r, httptest.NewRequest("GET", "/readyz", nil))
 	if r.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", r.Code)
+	}
+}
+
+func TestMetricsEndpointRecordsRealRequests(t *testing.T) {
+	handler := New()
+
+	r := httptest.NewRecorder()
+	handler.ServeHTTP(r, httptest.NewRequest("GET", "/healthz", nil))
+	if r.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", r.Code)
+	}
+
+	r = httptest.NewRecorder()
+	handler.ServeHTTP(r, httptest.NewRequest("GET", "/metrics", nil))
+	if r.Code != http.StatusOK {
+		t.Fatalf("GET /metrics: status = %d, want 200", r.Code)
+	}
+	if !strings.Contains(r.Body.String(), `http_requests_total{method="GET",route="GET /healthz",status="200"} 1`) {
+		t.Errorf("expected a real Prometheus counter line for the /healthz request, got:\n%s", r.Body.String())
 	}
 }

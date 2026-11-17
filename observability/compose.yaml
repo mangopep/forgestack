@@ -1,0 +1,104 @@
+# Independently attachable local observability stack: Prometheus (metrics),
+# Loki (logs), Tempo (traces), Grafana (dashboards), and an OpenTelemetry
+# Collector that receives traces from any ForgeStack-generated Go service
+# and forwards them to Tempo. Nothing here is required to run a generated
+# service -- internal/platform/telemetry works with zero collector present
+# (see docs/architecture/F6-OBSERVABILITY.md) -- this stack is what you
+# start when you actually want to *look at* the logs/metrics/traces it
+# produces. No AWS resource, no paid service: every image below is free and
+# runs entirely on your machine.
+#
+# Start:   docker compose -f observability/compose.yaml up -d
+# Stop:    docker compose -f observability/compose.yaml down
+# Wipe data (Prometheus/Loki/Tempo/Grafana volumes too): add -v to down.
+name: forgestack-observability
+
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.137.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      # Bound to loopback only (127.0.0.1:host:container) -- without an
+      # explicit host IP, Docker publishes on 0.0.0.0 and these
+      # unauthenticated dev endpoints become reachable from anyone else on
+      # your LAN/Wi-Fi, not just this machine.
+      - "127.0.0.1:4317:4317" # OTLP gRPC -- point OTEL_EXPORTER_OTLP_ENDPOINT's gRPC form here
+      - "127.0.0.1:4318:4318" # OTLP HTTP -- what internal/platform/telemetry's otlptracehttp exporter uses
+    depends_on:
+      - tempo
+
+  tempo:
+    image: grafana/tempo:2.8.3
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./tempo.yaml:/etc/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "127.0.0.1:3200:3200" # Tempo query API, used by Grafana's Tempo datasource
+
+  prometheus:
+    image: prom/prometheus:v3.7.3
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    extra_hosts:
+      # Lets prometheus.yml's default scrape target (host.docker.internal)
+      # reach a service you're running directly on your Mac (go run / a
+      # locally built binary), not just one inside this compose network.
+      - "host.docker.internal:host-gateway"
+
+  loki:
+    image: grafana/loki:3.5.9
+    command: ["-config.file=/etc/loki/local-config.yaml"]
+    ports:
+      - "127.0.0.1:3100:3100"
+    volumes:
+      - loki-data:/loki
+
+  promtail:
+    image: grafana/promtail:3.5.9
+    command: ["-config.file=/etc/promtail/config.yaml"]
+    volumes:
+      - ./promtail-config.yaml:/etc/promtail/config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
+
+  grafana:
+    image: grafana/grafana:12.4.0
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      # Anonymous Admin access with the login form disabled is a
+      # local-development-only convenience, never a production posture --
+      # see observability/README.md's security note. It's survivable here
+      # specifically because the port above binds to loopback, not 0.0.0.0:
+      # nothing on your LAN/Wi-Fi can reach it either way. A production or
+      # shared-network deployment of this stack must set these back to
+      # real authentication (GF_SECURITY_ADMIN_PASSWORD at minimum, SSO/
+      # OAuth for anything beyond a single operator) and must not rely on
+      # network-position-only "security."
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+
+volumes:
+  prometheus-data:
+  loki-data:
+  tempo-data:
+  grafana-data:

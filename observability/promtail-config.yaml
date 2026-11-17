@@ -1,0 +1,28 @@
+# Discovers containers via the Docker API (read-only socket mount) and
+# ships their stdout/stderr to Loki, labeled by container name. Only
+# containers you explicitly label com.forgestack.logs=true are scraped --
+# see observability/README.md for the exact `docker run --label` command --
+# so this never slurps every container on your machine, only the one you're
+# demonstrating.
+server:
+  http_listen_port: 9080
+
+positions:
+  filename: /tmp/promtail-positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: forgestack-containers
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+        filters:
+          - name: label
+            values: ["com.forgestack.logs=true"]
+    relabel_configs:
+      - source_labels: [__meta_docker_container_name]
+        target_label: container
+      - source_labels: [__meta_docker_container_label_com_forgestack_service]
+        target_label: service_name

@@ -10,10 +10,20 @@ import (
 	"syscall"
 	"time"
 
+	"__MODULE_PATH__/internal/platform/buildinfo"
 	"__MODULE_PATH__/internal/platform/router"
+	"__MODULE_PATH__/internal/platform/telemetry"
 )
 
 func main() {
+	setupCtx, cancelSetup := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownTelemetry, err := telemetry.SetupFromEnv(setupCtx, buildinfo.Name, buildinfo.Version)
+	cancelSetup()
+	if err != nil {
+		slog.Error("telemetry setup failed", "error", err)
+		os.Exit(1)
+	}
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "__PORT__"
@@ -42,5 +52,8 @@ func main() {
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		slog.Error("shutdown failed", "error", err)
+	}
+	if err := shutdownTelemetry(shutdownCtx); err != nil {
+		slog.Error("telemetry shutdown failed", "error", err)
 	}
 }

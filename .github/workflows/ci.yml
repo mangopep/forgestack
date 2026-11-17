@@ -34,6 +34,10 @@ jobs:
           go tool cover -func=coverage.out | tail -1
       - name: Build API
         run: go build ./cmd/api
+      - name: Verify F6 local composition and cleanup
+        run: |
+          bash scripts/test-new-service.sh
+          bash scripts/test-f6-local.sh
   security-baseline:
     runs-on: ubuntu-latest
     timeout-minutes: 15

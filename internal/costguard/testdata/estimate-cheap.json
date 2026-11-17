@@ -1,0 +1,24 @@
+{
+  "source": "this field is always overwritten to MOCK by LoadFixtureEstimate -- see fixture.go",
+  "generated_at": "2026-11-17T00:00:00Z",
+  "currency": "USD",
+  "resources": [
+    {
+      "address": "aws_s3_bucket.lab[0]",
+      "resource_type": "aws_s3_bucket",
+      "hourly_cost": 0.0,
+      "monthly_cost": 0.02,
+      "usage_based": true,
+      "assumptions": ["ap-south-1 region", "negligible storage/request volume for a sandbox bucket"]
+    },
+    {
+      "address": "aws_s3_bucket_public_access_block.lab[0]",
+      "resource_type": "aws_s3_bucket_public_access_block",
+      "hourly_cost": 0.0,
+      "monthly_cost": 0.0,
+      "assumptions": ["this resource type has no direct charge"]
+    }
+  ],
+  "total_hourly": 0.0,
+  "total_monthly": 0.02
+}

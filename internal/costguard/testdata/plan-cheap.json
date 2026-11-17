@@ -1,0 +1,17 @@
+{
+  "format_version": "1.2",
+  "resource_changes": [
+    {
+      "address": "aws_s3_bucket.lab[0]",
+      "type": "aws_s3_bucket",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {"actions": ["create"], "after": {"bucket": "forgestack-sample"}}
+    },
+    {
+      "address": "aws_s3_bucket_public_access_block.lab[0]",
+      "type": "aws_s3_bucket_public_access_block",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {"actions": ["create"], "after": {}}
+    }
+  ]
+}
