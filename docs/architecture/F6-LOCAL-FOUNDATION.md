@@ -4,10 +4,15 @@ title: F6 local composition and playground foundation
 
 # F6 local composition and playground foundation
 
-**Implemented locally on the F6 feature branch:** a versioned JSON module contract, a
-small capability and provider-version resolver, deterministic resolution output, and a
-local environment record with scoped cleanup. This is a development foundation. It does
-not deploy to AWS, create an automatic expiry controller, or claim production readiness.
+**Implemented on `develop`, local-only:** a versioned JSON module contract, a small
+capability and provider-version resolver, deterministic resolution output, a local
+environment record with scoped cleanup, and -- see `docs/architecture/PLAYGROUND-LIFECYCLE.md`
+-- a local automatic-expiration and bounded-retry cleanup controller with an opt-in
+worker/daemon entrypoint (`playground worker`). This is a development foundation. It does
+not deploy to AWS, create a *cloud* expiry/cleanup controller, or claim production
+readiness. Earlier revisions of this page said no automatic expiry controller existed at
+all; that stopped being true once the controller and worker landed on `develop` (PR #66)
+and is corrected here rather than left stale.
 
 ## Module contract and composition
 
@@ -80,9 +85,16 @@ generator stages output in a temporary sibling directory, refuses an existing de
 and removes the staging directory on failure. It writes stable provenance without a wall
 clock timestamp, so identical inputs produce identical files.
 
-TTL is metadata only in this increment. The user must invoke cleanup; no background
-controller survives laptop shutdown. Local verification is limited to the owned directory
-and its sibling names. It is not independent cloud inventory verification.
+TTL now drives real automatic behavior, not just metadata: `Controller.ExpireDue` /
+`Controller.CleanupDue` (and the `expire-due` / `cleanup-due` CLI subcommands) expire and
+clean up due playgrounds without a human re-invoking `cleanup`, and the opt-in
+`playground worker` entrypoint runs that on a timer as a standalone, long-lived process --
+see `docs/architecture/PLAYGROUND-LIFECYCLE.md`'s "The worker" section for how to start,
+stop, inspect and recover it. What remains true: the worker is a local process a human (or
+their own supervisor/systemd unit) starts explicitly; it is not a cloud service and does
+not survive the machine it runs on being shut down or the process being killed without a
+supervisor to restart it. Local verification is still limited to the owned directory and
+its sibling names -- it is not independent cloud inventory verification.
 
 ## Terraform and cloud boundary
 
@@ -118,6 +130,7 @@ name alone does not mean a module or adapter exists. The current verified exampl
 existing Go service template with its optional Docker Compose files; Postgres is not wired
 to that service, and Docker daemon execution may be unavailable on a local machine.
 
-There is no production mode deployment engine, secret backend, automatic TTL worker,
-Terraform remote state, cloud cleanup controller, resource cost estimator, or cloud
-inventory verification. Do not use this increment to manage real infrastructure.
+There is a local, opt-in automatic TTL worker (`playground worker`, PLAYGROUND-LIFECYCLE.md)
+-- but no production mode deployment engine, secret backend, Terraform remote state,
+*cloud* cleanup controller, resource cost estimator, or cloud inventory verification. Do
+not use this increment to manage real infrastructure.
