@@ -214,8 +214,8 @@ func finalizeCleanup(rootPath, id, metadataPath string, env Environment, entries
 	if err != nil {
 		return Result{Environment: env, Cleanup: "CLEANUP UNVERIFIED"}, fmt.Errorf("verify environment inventory: %w", err)
 	}
-	if !sameSiblingInventory(entriesBefore, entriesAfter, id) {
-		return Result{Environment: env, Cleanup: "CLEANUP UNVERIFIED"}, errors.New("environment inventory changed outside the owned resource directory")
+	if !priorSiblingsStillPresent(entriesBefore, entriesAfter, id) {
+		return Result{Environment: env, Cleanup: "CLEANUP UNVERIFIED"}, errors.New("a sibling environment present before cleanup is missing or changed afterward")
 	}
 	env.Status = StatusVerifiedClean
 	if err := writeMetadata(metadataPath, env); err != nil {
@@ -331,23 +331,27 @@ func ListEnvironments(root string) ([]Environment, error) {
 	return envs, nil
 }
 
-func sameSiblingInventory(before, after []os.DirEntry, id string) bool {
-	toNames := func(entries []os.DirEntry) []string {
-		var names []string
-		for _, entry := range entries {
-			if entry.Name() != id {
-				names = append(names, entry.Name())
-			}
+// priorSiblingsStillPresent reports whether every root-level entry that
+// existed in before (other than id, this environment's own directory)
+// still exists in after. It deliberately does not require the reverse: a
+// brand-new sibling appearing is not collateral damage from this
+// environment's cleanup, it's simply a concurrent Manager.Create for a
+// different, independently-generated random ID landing in the same
+// window -- entirely ownership-scoped to environments this snapshot
+// pair already knew about, never to anything created afterward. What
+// this must still catch, and does, is any PRIOR sibling going missing or
+// being altered, which is the actual thing cleanup must never cause.
+func priorSiblingsStillPresent(before, after []os.DirEntry, id string) bool {
+	afterByName := make(map[string]os.DirEntry, len(after))
+	for _, entry := range after {
+		afterByName[entry.Name()] = entry
+	}
+	for _, entry := range before {
+		if entry.Name() == id {
+			continue
 		}
-		sort.Strings(names)
-		return names
-	}
-	a, b := toNames(before), toNames(after)
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
+		afterEntry, stillPresent := afterByName[entry.Name()]
+		if !stillPresent || afterEntry.IsDir() != entry.IsDir() {
 			return false
 		}
 	}

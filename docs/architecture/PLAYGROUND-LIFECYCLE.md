@@ -81,7 +81,7 @@ adds is strict, label-scoped tracking and reconciliation:
 
 ## Test evidence
 
-27 tests in `internal/playground`, `go test -race` clean, `golangci-lint` 0 issues. The 5
+31 tests in `internal/playground`, `go test -race` clean, `golangci-lint` 0 issues. The 5
 pre-existing tests are unchanged and still pass. New:
 
 | Requirement | Test(s) |
@@ -101,6 +101,9 @@ pre-existing tests are unchanged and still pass. New:
 | Lock mutual exclusion / crash recovery | `TestWithEnvironmentLockBlocksConcurrentAcquisition`, `TestWithEnvironmentLockRecoversAfterSimulatedCrash` |
 | Concurrent controllers, asymmetric failures (stress) | `TestControllerCleanupDueConcurrentCallersConvergeWithoutCorruption` |
 | Lost-update protection on tracked resources | `TestTrackDockerResourceConcurrentCallsNeverLoseAnUpdate` |
+| Sibling-inventory false positive closed (deterministic repro) | `TestConcurrentCreateDuringCleanupNeverCausesFalseUnverified` |
+| Sibling check still catches real collateral damage | `TestPriorSiblingsStillPresentStillDetectsRealCollateralDamage` |
+| Cross-environment isolation under concurrency (create/track/delete) | `TestConcurrentCleanupOfDifferentEnvironmentNeverAffectsThisOnesResult`, `TestConcurrentTrackDockerResourceOnDifferentEnvironmentNeverAffectsThisOnesResult` |
 
 **End-to-end CLI evidence** (`cmd/playground`, run directly, not just unit-tested): `create`
 with a 2-second TTL → `expire-due` → `cleanup-due` reaches `verified_clean`; separately,
@@ -186,3 +189,37 @@ protect there.
 but it is still an advisory lock: a process that writes `environment.json` or
 `docker-resources.json` directly, bypassing `Manager`/`Controller` entirely, is not stopped
 from doing so. That was already true before this change and is not a new gap.
+
+## Ownership-scoped sibling verification
+
+Per-environment locking above closes races *between operations on the same environment*. It
+does nothing for a different kind of false positive: `finalizeCleanup`'s independent
+verification snapshots the whole root directory's sibling listing before and after removal, to
+catch collateral damage -- but the original check (`sameSiblingInventory`) required the two
+snapshots to be *identical*, siblings included. A completely unrelated `Manager.Create` for a
+different, independently-generated random ID landing in that same before/after window (legal:
+`Create` takes no per-environment lock, since a fresh random ID can never collide with the
+environment being cleaned up) added one entry to the "after" snapshot, tripped the equality
+check, and reported a false `CLEANUP_UNVERIFIED` for a cleanup that had, in fact, fully
+succeeded.
+
+`TestConcurrentCreateDuringCleanupNeverCausesFalseUnverified` reproduces this deterministically
+(the same before/after window, forced via the `removeAll` hook, with a concurrent `Create`
+landing inside it) and confirms the fix: `sameSiblingInventory` is replaced by
+`priorSiblingsStillPresent`, which checks that every sibling present *before* is still present
+*after* (same name, same `IsDir()`), but does not require the reverse. This is still
+ownership-scoped, independent verification -- it is exactly as strict about anything this
+cleanup could have disturbed, and only tolerates something it provably could not have: an entry
+that did not exist yet when the snapshot was taken.
+`TestPriorSiblingsStillPresentStillDetectsRealCollateralDamage` is the negative-test
+counterpart proving this is a relaxation, not a weakening: a prior sibling actually going
+missing, or changing from a directory to something else, is still caught.
+
+Two further tests confirm the other two cases item 3 of this round's review asked for directly:
+`TestConcurrentCleanupOfDifferentEnvironmentNeverAffectsThisOnesResult` (environment B's own,
+fully concurrent `Cleanup` never affects environment A's result -- expected, since `Cleanup`
+never removes an environment's own top-level directory, only its `resources` subdirectory, so
+it never touches the root-level listing the sibling check inspects) and
+`TestConcurrentTrackDockerResourceOnDifferentEnvironmentNeverAffectsThisOnesResult` (tracking a
+resource against B while A is mid-cleanup is likewise invisible to A, since `TrackDockerResource`
+only ever writes inside its own environment's directory).
