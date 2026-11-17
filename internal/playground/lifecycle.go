@@ -20,6 +20,22 @@ const maxTTL = 24 * time.Hour
 
 var safeID = regexp.MustCompile(`^env-[a-f0-9]{16}$`)
 
+// Status values an Environment can carry. These are the exact strings
+// already written to disk and asserted by this package's existing tests
+// (e.g. lifecycle_test.go checks literal "active"/"cleanup_incomplete"/
+// "verified_clean") -- naming them here doesn't change a single value,
+// it just gives the controller (controller.go) named constants instead of
+// repeating the magic strings, and adds the two states that previously had
+// no representation at all: StatusExpired and StatusCleanupPending.
+const (
+	StatusActive            = "active"
+	StatusExpired           = "expired"
+	StatusCleanupPending    = "cleanup_pending"
+	StatusCleanupIncomplete = "cleanup_incomplete"
+	StatusCleanupUnverified = "cleanup_unverified"
+	StatusVerifiedClean     = "verified_clean"
+)
+
 type Environment struct {
 	ID        string    `json:"id"`
 	Owner     string    `json:"owner"`
@@ -93,7 +109,7 @@ func (m Manager) Create(root, owner, mode string, ttl time.Duration, modules []s
 		return Environment{}, fmt.Errorf("generate environment ID: %w", err)
 	}
 	now := time.Now().UTC()
-	env := Environment{ID: "env-" + hex.EncodeToString(random[:]), Owner: owner, Mode: mode, Modules: append([]string(nil), modules...), CreatedAt: now, Status: "active"}
+	env := Environment{ID: "env-" + hex.EncodeToString(random[:]), Owner: owner, Mode: mode, Modules: append([]string(nil), modules...), CreatedAt: now, Status: StatusActive}
 	if mode == "playground" {
 		env.ExpiresAt = now.Add(ttl)
 	}
@@ -178,13 +194,13 @@ func (m Manager) removeOwnedResources(dir, metadataPath string, env Environment)
 			return Result{}, false, errors.New("owned resources path is not a real directory")
 		}
 		if err := m.removeAll(resources); err != nil {
-			env.Status = "cleanup_incomplete"
+			env.Status = StatusCleanupIncomplete
 			_ = writeMetadata(metadataPath, env)
 			return Result{Environment: env, Cleanup: "CLEANUP INCOMPLETE"}, false, fmt.Errorf("remove owned local resources: %w", err)
 		}
 	}
 	if _, err := os.Lstat(resources); !errors.Is(err, fs.ErrNotExist) {
-		env.Status = "cleanup_unverified"
+		env.Status = StatusCleanupUnverified
 		_ = writeMetadata(metadataPath, env)
 		return Result{Environment: env, Cleanup: "CLEANUP UNVERIFIED"}, false, errors.New("owned resources remain or cannot be verified absent")
 	}
@@ -201,7 +217,7 @@ func finalizeCleanup(rootPath, id, metadataPath string, env Environment, entries
 	if !sameSiblingInventory(entriesBefore, entriesAfter, id) {
 		return Result{Environment: env, Cleanup: "CLEANUP UNVERIFIED"}, errors.New("environment inventory changed outside the owned resource directory")
 	}
-	env.Status = "verified_clean"
+	env.Status = StatusVerifiedClean
 	if err := writeMetadata(metadataPath, env); err != nil {
 		return Result{Environment: env, Cleanup: "CLEANUP UNVERIFIED"}, fmt.Errorf("persist cleanup evidence: %w", err)
 	}
@@ -246,6 +262,48 @@ func (m Manager) Cleanup(root, id, owner string) (Result, error) {
 		return removed, err
 	}
 	return finalizeCleanup(rootPath, id, metadataPath, removed.Environment, entriesBefore, alreadyAbsent)
+}
+
+// ListEnvironments reads every environment.json directly under root and
+// returns the Environment it describes, skipping (not failing on) any
+// sibling entry that isn't a safeID-shaped directory with a readable,
+// well-formed ownership record -- a controller scanning for expired
+// environments must not abort entirely because one neighboring entry is
+// unrelated or corrupted. Read-only: never creates, modifies, or removes
+// anything.
+func ListEnvironments(root string) ([]Environment, error) {
+	rootPath, err := filepath.Abs(root)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(rootPath)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("list environment root: %w", err)
+	}
+	var envs []Environment
+	for _, entry := range entries {
+		if !entry.IsDir() || !safeID.MatchString(entry.Name()) {
+			continue
+		}
+		metadataPath := filepath.Join(rootPath, entry.Name(), "environment.json")
+		data, readErr := os.ReadFile(metadataPath) //nolint:gosec // G304: path is built from a regex-validated environment ID under an operator-supplied root, not arbitrary input
+		if readErr != nil {
+			continue
+		}
+		var env Environment
+		if jsonErr := json.Unmarshal(data, &env); jsonErr != nil {
+			continue
+		}
+		if env.ID != entry.Name() {
+			continue
+		}
+		envs = append(envs, env)
+	}
+	sort.Slice(envs, func(i, j int) bool { return envs[i].ID < envs[j].ID })
+	return envs, nil
 }
 
 func sameSiblingInventory(before, after []os.DirEntry, id string) bool {

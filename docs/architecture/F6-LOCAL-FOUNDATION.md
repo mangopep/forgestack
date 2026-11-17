@@ -61,6 +61,10 @@ checks it is absent, compares sibling inventory names, and retains the ownership
 inventory check reports `CLEANUP UNVERIFIED`. A repeated cleanup is safe and reports the
 already-absent state. It does not use wildcards or accept a user-provided resource path.
 
+Automatic expiration, bounded-retry cleanup, restart recovery, and independent reconciliation
+against real local Docker resources build on this manager without changing it -- see
+`docs/architecture/PLAYGROUND-LIFECYCLE.md`.
+
 Create and clean a playground record:
 
 ```bash
