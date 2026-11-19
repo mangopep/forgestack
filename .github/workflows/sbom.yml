@@ -38,7 +38,7 @@ jobs:
             sbom-go-raw.cdx.json sbom-go.cdx.json
       - name: Validate against NTIA/CISA minimum elements
         run: go run ./cmd/sbomcheck validate sbom-go.cdx.json
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sbom-go-module
           path: sbom-go.cdx.json
@@ -68,7 +68,7 @@ jobs:
             sbom-go-image-raw.cdx.json sbom-go-image.cdx.json
       - name: Validate against NTIA/CISA minimum elements
         run: go run ./cmd/sbomcheck validate sbom-go-image.cdx.json
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sbom-go-image
           path: sbom-go-image.cdx.json
@@ -98,7 +98,7 @@ jobs:
             sbom-python-image-raw.cdx.json sbom-python-image.cdx.json
       - name: Validate against NTIA/CISA minimum elements
         run: go run ./cmd/sbomcheck validate sbom-python-image.cdx.json
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sbom-python-image
           path: sbom-python-image.cdx.json
