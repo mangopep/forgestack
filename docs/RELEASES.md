@@ -4,18 +4,19 @@ title: Trusted releases
 
 # Trusted releases
 
-**Status: `v0.1.2` is a verified, fully successful release — the first in this repo's
-history.** `v0.1.0` and `v0.1.1` both failed partway through `publish`, at a different step
-each time; both failures were fixed, and `v0.1.2` proved the fixes live, end to end,
-including independent re-verification after the run (not just trusting the job's own
-report). See "`v0.1.0` failed-attempt history", "`v0.1.1` failed-attempt history", and
-"`v0.1.2` — verified successful release" below for the full account of each attempt, in
-order, with nothing altered or removed from the earlier two.
+**Status: `v0.1.2` and `v0.2.0` are both verified, fully successful releases.** `v0.1.0` and
+`v0.1.1` both failed partway through `publish`, at a different step each time; both
+failures were fixed, `v0.1.2` proved the fixes live end to end, and `v0.2.0` — F6's first
+release — proved the same pipeline succeeds a second time on different content, with
+independent re-verification after each run (not just trusting the job's own report). See
+"`v0.1.0` failed-attempt history", "`v0.1.1` failed-attempt history", "`v0.1.2` — verified
+successful release", and "`v0.2.0` — verified successful release, F6" below for the full
+account of each attempt, in order, with nothing altered or removed from any earlier one.
 
-**This does not mean the pipeline is proven for every future case** — see "`v0.1.2`" below
-for the specific limitations that remain (a single successful run, not a long-running
-track record; the live attestation-verification call path exercised for the first time;
-the still-open, separately tracked vulnerability exceptions #35/#40).
+**This does not mean the pipeline is proven for every future case** — see "`v0.2.0`" below
+for the specific limitations that remain (two successful runs, not a long-running track
+record; single-platform images only; no tag-protection ruleset; the still-open, separately
+tracked vulnerability exceptions #35/#40).
 
 ## Pipeline overview
 
@@ -41,9 +42,10 @@ every other job (`build-test-scan`, `publish`) depends on via `needs:` — nothi
 signs, or publishes before it passes.
 
 The `publish` job is the one carrying privileged credentials (`contents: write`,
-`packages: write`, `id-token: write`, `attestations: write`). It has now run live three
-times (`v0.1.0`, `v0.1.1`, `v0.1.2`) and succeeded in full on the third — see "`v0.1.2` —
-verified successful release" below for the live verification evidence. `validate-tag` and
+`packages: write`, `id-token: write`, `attestations: write`). It has now run live four
+times (`v0.1.0`, `v0.1.1`, `v0.1.2`, `v0.2.0`) and succeeded in full on the third and
+fourth — see "`v0.1.2` — verified successful release" and "`v0.2.0` — verified successful
+release, F6" below for the live verification evidence on each. `validate-tag` and
 `build-test-scan` are identical in trust level to every other CI job in this repository.
 
 ## `v0.1.0` failed-attempt history
@@ -357,6 +359,142 @@ Reconfirmed after this run, with no changes: `v0.1.0`'s tag and Go image, and `v
 tag and both signed-but-unattested images, are exactly as described in their own sections
 above — nothing about `v0.1.2`'s success retroactively changes, repairs, or obsoletes
 either prior record.
+
+## `v0.2.0` — verified successful release, F6
+
+**2026-11-17, fourth live run of `release.yml`. Second fully successful release.** Tag
+`v0.2.0` pushed against the verified `main` commit
+`d3c46179a61c7fe4215841cc992f4ff5e8f7cf7f` (the commit that promoted F6's local foundation
+— module contracts, Cost Guard, observability, and playground lifecycle safety — all the
+way to `main`; see `docs/architecture/F6-LOCAL-FOUNDATION.md` and
+`docs/architecture/PLAYGROUND-LIFECYCLE.md`). `go run ./cmd/semvercheck compat v0.1.2
+v0.2.0` classifies it as `compatible` (a minor bump: new functionality, nothing removed or
+broken).
+
+**Release:** [github.com/mangopep/forgestack/releases/tag/v0.2.0](https://github.com/mangopep/forgestack/releases/tag/v0.2.0)
+**Workflow run:** [44077109378](https://github.com/mangopep/forgestack/actions/runs/44077109378)
+
+### What happened, confirmed from the actual job logs
+
+- `validate-tag`: **passed** — ancestry guard confirmed `d3c46179a6...` reachable from
+  `main`; `v0.2.0` validated as real, compatible SemVer; no pre-existing release for that
+  tag.
+- `build-test-scan`: **passed** — race-detected tests, both version-embedding checks, both
+  Trivy scans (see "Vulnerability exceptions" below).
+- `publish`: **passed in full** — registry preflight, both image builds, version
+  verification, SBOM generation/augmentation/validation, GHCR login, both image pushes,
+  digest resolution, cosign install, both signatures, both build-provenance attestations,
+  the post-attestation verification step, and GitHub Release creation. The `if: failure()`
+  "PARTIAL RELEASE" step correctly **skipped**.
+
+### Published artifacts
+
+| Artifact | Value |
+|---|---|
+| Go image (immutable index digest) | `ghcr.io/mangopep/forgestack@sha256:bc600da824bcdb95c26e72d99e7dfb00899f47eb58ebb7cbd0e8954e74d10842` |
+| Python image (immutable index digest) | `ghcr.io/mangopep/forgestack-python-api@sha256:891b229d427d5158f2adeee5edd697312f97e0d6445435c4dc6d6a79bfbd2c24` |
+| Source commit | `d3c46179a61c7fe4215841cc992f4ff5e8f7cf7f` (`main`) |
+| GitHub Release | [github.com/mangopep/forgestack/releases/tag/v0.2.0](https://github.com/mangopep/forgestack/releases/tag/v0.2.0), assets `sbom-go.cdx.json`, `sbom-python.cdx.json` |
+
+### Independent verification performed after the run
+
+Every claim below was re-checked directly against GHCR/GitHub/Sigstore after the workflow
+finished — not read off the job's own summary:
+
+- **Platform, stated exactly, not overstated**: `docker manifest inspect` against both
+  `v0.2.0` tags shows exactly one real platform manifest each (`linux/amd64`) plus one
+  `unknown/unknown` attestation-manifest entry (BuildKit's own convention, not a second
+  real platform). **Single-platform, same as `v0.1.2` — no `arm64` build exists.** Do not
+  describe this release as multi-platform.
+- **Image index digest**: `docker buildx imagetools inspect` confirms the tag's top-level
+  index digest matches the Release notes exactly for both images (`sha256:bc600da8...` Go,
+  `sha256:891b229d...` Python) — the Release notes reference the real, resolvable artifact,
+  not a mismatched value.
+- **Cosign signature**: `cosign verify` against both image digests succeeded (keyless,
+  Fulcio-issued certificate), with embedded claims showing
+  `githubWorkflowSha: d3c46179a61c7fe4215841cc992f4ff5e8f7cf7f`,
+  `githubWorkflowRef: refs/tags/v0.2.0`, `githubWorkflowName: Trusted Release` for both
+  images.
+- **GitHub-native provenance attestation**: `gh attestation verify oci://<image>@<digest>
+  --repo mangopep/forgestack` succeeded for both images, `sourceRepositoryDigest:
+  d3c46179a61c7fe4215841cc992f4ff5e8f7cf7f` for both — the same live call path `v0.1.2`
+  first proved end to end, working again on a second real release.
+- **Release SBOMs**: both assets downloaded fresh from the Release and passed `go run
+  ./cmd/sbomcheck validate` (989 components / Go, 1029 / Python, all required minimum
+  elements present); `metadata.properties` on both carry `forgestack:commit:
+  d3c46179a61c7fe4215841cc992f4ff5e8f7cf7f`, binding each SBOM back to the exact source
+  commit.
+- **No secrets in release evidence**: both downloaded SBOMs scanned for common secret
+  shapes (AWS access keys, private-key PEM headers, inline `password=`/`password:`
+  literals) — no matches. Manual pattern check, not a `gitleaks` run, same caveat as
+  `v0.1.2`'s own verification.
+- **`v0.1.2` confirmed unaffected**: its image digest (`sha256:4c9d985341a872ab...`) and
+  release body are byte-identical to the record above — publishing `v0.2.0` touched
+  nothing about any prior release.
+
+### What F6 actually adds, and its known limitations — stated precisely, not generally
+
+**Implemented, local-only, verified (see `docs/architecture/F6-LOCAL-FOUNDATION.md` and
+`docs/architecture/PLAYGROUND-LIFECYCLE.md` for the full detail):**
+- Versioned module manifests with a capability/provider-version compatibility resolver
+  (`cmd/modulecheck`).
+- A local playground lifecycle: automatic TTL expiration, bounded-retry cleanup,
+  cross-process per-environment locking (`flock`), ownership-scoped collateral-damage
+  detection, and an **opt-in** cleanup worker/daemon (`playground worker`) — a human
+  explicitly starts it; nothing runs automatically on its own.
+- Docker container/volume/network reconciliation, strictly scoped by exact label value —
+  never by name, pattern, or "all of kind X."
+- A **local** Cost Guard pre-deployment cost gate (`internal/costguard`): Terraform plan
+  scanning against a budget, with an *optional* Infracost integration for real pricing data.
+  **This distinction matters and must not be collapsed**: the plan-scanning/budget-rule
+  logic is the always-available local check; Infracost is a separate, optional adapter that
+  **fails closed** (reports unavailable, never guesses a price) when no API key is
+  configured — it is not required for Cost Guard to function, and its absence does not
+  weaken the local gate.
+- Real OpenTelemetry tracing and Prometheus metrics (`internal/platform/telemetry`).
+- Terraform governance conventions (module tagging scheme, immutability policy) for a
+  future module catalog that does not exist yet.
+
+**Explicitly not included — do not infer otherwise:**
+- No AWS adapter, no cloud lifecycle/expiry/cleanup controller, no cost reconciliation
+  against real cloud billing. Everything above runs against the local filesystem and a
+  local Docker daemon only.
+- No multi-platform container images — confirmed above, `linux/amd64` only, same as every
+  release so far.
+- No tag-protection ruleset — see "Tag-protection governance gap" below.
+- Cost Guard's Infracost integration has not been exercised against a live Infracost API
+  key in this release; only its fails-closed-without-a-key path and its offline fixtures
+  are verified (see `internal/costguard/infracost_adapter_test.go`).
+
+### Vulnerability exceptions (unchanged by this release)
+
+Same two tracked, documented exceptions as `v0.1.2`, not widened or narrowed by F6: issue
+**#35** (26 pre-existing npm audit findings in `website/`'s dev tooling, unrelated to the
+released images) and issue **#40** (the Python base image's `ignore-unfixed: true`
+exception) both remain open and tracked, and this release's Trivy gates ran under the exact
+same policy.
+
+### Tag-protection governance gap — documented, not fixed here
+
+No GitHub ruleset with `target: "tag"` exists for this repository — confirmed directly
+against the live rulesets API during this release's preparation (`docs/adr/0007-terraform-module-versioning-and-change-governance.md`,
+section 5, checked 2026-11-17). `v0.1.0`, `v0.1.1`, `v0.1.2`, and now `v0.2.0` are all
+**unprotected today**: anyone with push access could force-move or delete any of these
+tags, and nothing on GitHub would stop it. A concrete, minimal proposed ruleset
+(`target: tag`, `refs/tags/v*`, blocking only `update` and `deletion`) is specified in that
+ADR section, along with an explicit analysis that it would change nothing about how
+`release.yml` itself publishes a release — only block a force-push/delete against an
+*existing* tag. **The ruleset itself has not been created and requires separate, explicit
+approval** — this is a repository-setting change, out of scope for any documentation
+update. Until it exists, treat every tag above, including `v0.2.0`, as policy-immutable
+by convention only, not by enforcement.
+
+### Current state — `v0.1.0`, `v0.1.1`, and `v0.1.2` unaffected
+
+Reconfirmed after this run, with no changes: all three prior releases' tags, images,
+signatures, attestations, and (where they exist) GitHub Releases are exactly as described
+in their own sections above. Nothing about `v0.2.0`'s success retroactively changes,
+repairs, or obsoletes any earlier record.
 
 ## Preventing accidental duplicate versions, tag overwrites, and partial releases
 
