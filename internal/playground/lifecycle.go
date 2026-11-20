@@ -34,6 +34,15 @@ const (
 	StatusCleanupIncomplete = "cleanup_incomplete"
 	StatusCleanupUnverified = "cleanup_unverified"
 	StatusVerifiedClean     = "verified_clean"
+	// StatusCleanupAttentionRequired marks a cleanup that has exhausted
+	// its bounded automatic retry budget for at least one additive
+	// domain (today: cloud -- see Controller.MaxCloudCleanupAttempts).
+	// Deliberately excluded from needsCleanup's retry set: once an
+	// environment reaches this status, no further automatic pass
+	// attempts it (no more API calls are spent on it), and its tracked
+	// resources are left exactly as they were -- never discarded --
+	// until a human explicitly calls ResetCloudCleanupAttempts.
+	StatusCleanupAttentionRequired = "cleanup_attention_required"
 )
 
 type Environment struct {
@@ -207,9 +216,130 @@ func (m Manager) removeOwnedResources(dir, metadataPath string, env Environment)
 	return Result{Environment: env}, alreadyAbsent, nil
 }
 
+// errTrackedResourcesUnverifiable is returned (wrapped, with the
+// offending domain named) when cleanup is about to persist
+// StatusVerifiedClean but dir still has a tracked Docker and/or cloud
+// resource that this call has no client to verify or remove -- see
+// guardVerifiedCleanStatus.
+var errTrackedResourcesUnverifiable = errors.New("tracked additive resources remain and could not be verified absent by this cleanup call")
+
+// hasUnverifiableAdditionalResources reports whether dir's
+// docker-resources.json or cloud-resources.json names any tracked
+// resource -- or could not be read at all -- that a caller with no
+// corresponding client has no way to confirm is actually gone.
+//
+// Fails closed deliberately: a read error (malformed JSON, a partially
+// written file caught mid-write, a permissions problem) is treated
+// exactly like "yes, resources are tracked," never like "file's not
+// there, so there's nothing to track." The alternative -- silently
+// treating an unreadable tracking file as empty -- is precisely the gap
+// that would let a corrupted docker-resources.json or cloud-resources.json
+// authorize a false verified_clean.
+func hasUnverifiableAdditionalResources(dir string) (domain string, err error) {
+	if unverifiable, dockerErr := trackedDockerResourcesUnverifiable(dir); dockerErr != nil {
+		return "docker", dockerErr
+	} else if unverifiable {
+		return "docker", nil
+	}
+	if unverifiable, cloudErr := trackedCloudResourcesUnverifiable(dir); cloudErr != nil {
+		return "cloud", cloudErr
+	} else if unverifiable {
+		return "cloud", nil
+	}
+	return "", nil
+}
+
+// trackedDockerResourcesUnverifiable reports whether dir's
+// docker-resources.json names any tracked resource, or could not be
+// read at all (fails closed: a read error counts as "yes, unverifiable",
+// never as "nothing tracked"). Shared by hasUnverifiableAdditionalResources
+// above (Manager.cleanup's own direct-call guard) AND by
+// Controller.verifyAdditionalDomains (controller.go) -- a third
+// independent audit found verifyAdditionalDomains had no equivalent
+// guard of its own: a Controller configured with only Cloud (not
+// Docker) could persist StatusVerifiedClean via its own direct
+// c.persist call while a tracked Docker resource remained completely
+// unverified, because that write never went through Manager.cleanup/
+// guardVerifiedCleanStatus at all. Both call sites now share this one
+// tracked-file check -- not two independently-maintained copies of the
+// same safety decision.
+func trackedDockerResourcesUnverifiable(dir string) (bool, error) {
+	docker, err := loadTrackedDockerResources(dir)
+	if err != nil {
+		return true, fmt.Errorf("tracked docker resources could not be read: %w", err)
+	}
+	return len(docker) > 0, nil
+}
+
+// trackedCloudResourcesUnverifiable is
+// trackedDockerResourcesUnverifiable's cloud equivalent.
+func trackedCloudResourcesUnverifiable(dir string) (bool, error) {
+	cloud, err := loadTrackedCloudResources(dir)
+	if err != nil {
+		return true, fmt.Errorf("tracked cloud resources could not be read: %w", err)
+	}
+	return len(cloud) > 0, nil
+}
+
+// guardVerifiedCleanStatus is the single choke point enforcing this
+// package's core safety invariant at the Manager boundary, not only
+// inside Controller.cleanupOne: StatusVerifiedClean must never be
+// persisted by ANY public cleanup entry point -- Manager.Cleanup (the
+// `playground cleanup` CLI command calls this directly, with no
+// Docker/Cloud client at all) or Controller's own local-only path (no
+// Docker/Cloud client configured on that Controller) -- while dir still
+// has a tracked additive resource this call cannot itself verify absent.
+//
+// Called only when the caller's requested successStatus is
+// StatusVerifiedClean; any other successStatus (e.g. Controller's
+// StatusCleanupPending while it still has its own configured-client
+// domains left to check) already means "not yet claiming verified
+// clean," so there is nothing for this guard to downgrade.
+//
+// On a block, it downgrades to StatusCleanupPending rather than
+// StatusCleanupIncomplete/StatusCleanupUnverified: StatusCleanupPending
+// is already in needsCleanup's retry set (lifecycle.go), so the very
+// next CleanupDue/worker pass -- run by this process or a completely
+// different one, since nothing here is in-memory state -- picks this
+// environment back up and resumes, exactly like any other interrupted
+// attempt. It never touches docker-resources.json/cloud-resources.json:
+// the tracked-resource evidence this environment's additive domains
+// still need is left completely untouched for that next pass to act on.
+func guardVerifiedCleanStatus(dir, successStatus string) (string, error) {
+	if successStatus != StatusVerifiedClean {
+		return successStatus, nil
+	}
+	domain, err := hasUnverifiableAdditionalResources(dir)
+	if err != nil {
+		return StatusCleanupPending, fmt.Errorf("%w (left cleanup_pending, retryable): %w", errTrackedResourcesUnverifiable, err)
+	}
+	if domain != "" {
+		return StatusCleanupPending, fmt.Errorf("%w: tracked %s resource(s) remain and no %s client is configured on this cleanup call -- left cleanup_pending for a Controller/CleanupDue pass with that client configured to resume", errTrackedResourcesUnverifiable, domain, domain)
+	}
+	return successStatus, nil
+}
+
 // finalizeCleanup compares the root's sibling inventory against its
-// pre-removal snapshot and only then records verified_clean.
-func finalizeCleanup(rootPath, id, metadataPath string, env Environment, entriesBefore []os.DirEntry, alreadyAbsent bool) (Result, error) {
+// pre-removal snapshot and only then records successStatus.
+//
+// successStatus is never hardcoded to StatusVerifiedClean here: Cleanup
+// (below) always passes StatusVerifiedClean, since a direct Cleanup call
+// has no further domain to wait for. Controller's internal cleanup
+// variant (controller.go) passes StatusCleanupPending instead whenever it
+// has Docker/Cloud domains still to verify -- so the on-disk status
+// never claims "verified clean" before every configured domain has
+// actually been checked. cleanup_pending is already in needsCleanup's
+// retry set, so a crash in the window between local success and the
+// Controller's own later domain checks is recovered exactly like any
+// other interrupted attempt, never silently treated as done.
+//
+// This is the second, independent line of defense for that same
+// invariant: even if a caller passes StatusVerifiedClean directly (every
+// caller in this package now runs it through guardVerifiedCleanStatus
+// first -- see cleanup below), finalizeCleanup itself does not know or
+// care who called it, so it simply records whatever successStatus it was
+// actually given.
+func finalizeCleanup(rootPath, id, metadataPath string, env Environment, entriesBefore []os.DirEntry, alreadyAbsent bool, successStatus string) (Result, error) {
 	entriesAfter, err := os.ReadDir(rootPath)
 	if err != nil {
 		return Result{Environment: env, Cleanup: "CLEANUP UNVERIFIED"}, fmt.Errorf("verify environment inventory: %w", err)
@@ -217,11 +347,14 @@ func finalizeCleanup(rootPath, id, metadataPath string, env Environment, entries
 	if !priorSiblingsStillPresent(entriesBefore, entriesAfter, id) {
 		return Result{Environment: env, Cleanup: "CLEANUP UNVERIFIED"}, errors.New("a sibling environment present before cleanup is missing or changed afterward")
 	}
-	env.Status = StatusVerifiedClean
+	env.Status = successStatus
 	if err := writeMetadata(metadataPath, env); err != nil {
 		return Result{Environment: env, Cleanup: "CLEANUP UNVERIFIED"}, fmt.Errorf("persist cleanup evidence: %w", err)
 	}
-	status := "VERIFIED CLEAN"
+	status := "LOCAL RESOURCES VERIFIED REMOVED"
+	if successStatus == StatusVerifiedClean {
+		status = "VERIFIED CLEAN"
+	}
 	if alreadyAbsent {
 		status += " (already absent)"
 	}
@@ -245,6 +378,20 @@ func finalizeCleanup(rootPath, id, metadataPath string, env Environment, entries
 // "already absent" is exactly what it sees, and it never calls removeAll
 // at all.
 func (m Manager) Cleanup(root, id, owner string) (Result, error) {
+	return m.cleanup(root, id, owner, StatusVerifiedClean)
+}
+
+// cleanup is Cleanup's shared implementation, parameterized by
+// successStatus (see finalizeCleanup's doc comment for why). Identical to
+// the former, unparameterized Cleanup when called with successStatus ==
+// StatusVerifiedClean AND dir has no tracked Docker/cloud resource this
+// call cannot verify -- the common case, so every existing local-only
+// test against it is unchanged. When dir DOES have such a resource,
+// guardVerifiedCleanStatus (above) downgrades the persisted status to
+// StatusCleanupPending and this returns a non-nil error instead of
+// silently claiming verified_clean; see guardVerifiedCleanStatus's doc
+// comment for why.
+func (m Manager) cleanup(root, id, owner, successStatus string) (Result, error) {
 	if !safeID.MatchString(id) {
 		return Result{}, errors.New("invalid environment ID")
 	}
@@ -258,7 +405,11 @@ func (m Manager) Cleanup(root, id, owner string) (Result, error) {
 	dir := filepath.Join(rootPath, id)
 	dirInfo, err := os.Lstat(dir)
 	if errors.Is(err, fs.ErrNotExist) {
-		return Result{Cleanup: "VERIFIED CLEAN (already absent)"}, nil
+		status := "VERIFIED CLEAN (already absent)"
+		if successStatus != StatusVerifiedClean {
+			status = "LOCAL RESOURCES VERIFIED REMOVED (already absent)"
+		}
+		return Result{Environment: Environment{ID: id, Owner: owner, Status: successStatus}, Cleanup: status}, nil
 	}
 	if err != nil {
 		return Result{}, fmt.Errorf("inspect environment: %w", err)
@@ -283,8 +434,16 @@ func (m Manager) Cleanup(root, id, owner string) (Result, error) {
 			result = removed
 			return lockErr
 		}
-		result, lockErr = finalizeCleanup(lockedRootPath, id, metadataPath, removed.Environment, entriesBefore, alreadyAbsent)
-		return lockErr
+		finalStatus, guardErr := guardVerifiedCleanStatus(dir, successStatus)
+		result, lockErr = finalizeCleanup(lockedRootPath, id, metadataPath, removed.Environment, entriesBefore, alreadyAbsent, finalStatus)
+		if lockErr != nil {
+			return lockErr
+		}
+		if guardErr != nil {
+			result.Cleanup = "CLEANUP PENDING (local resources removed; " + guardErr.Error() + ")"
+			return guardErr
+		}
+		return nil
 	})
 	return result, err
 }

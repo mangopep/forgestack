@@ -3,7 +3,11 @@ package playground
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -394,5 +398,192 @@ func TestWorkerRealDockerEndToEnd(t *testing.T) {
 	}
 	if len(refs) != 0 {
 		t.Fatalf("expected the real network to be gone, an independent docker query still found: %v", refs)
+	}
+}
+
+// TestWorkerPassLogDistinguishesAttentionRequiredFromOrdinaryRetry is the
+// permanent regression test for P1 of the second independent audit:
+// runPass's log line must count StatusCleanupAttentionRequired
+// separately from ordinary, still-self-retrying failures
+// (cleanup_incomplete/cleanup_unverified/cleanup_pending) -- not fold
+// both into one undifferentiated "unverified" number, which would hide
+// the one status that actually needs a human (see
+// ResetCloudCleanupAttempts) behind the much larger, self-resolving
+// count of in-progress ordinary retries.
+func TestWorkerPassLogDistinguishesAttentionRequiredFromOrdinaryRetry(t *testing.T) {
+	root := t.TempDir()
+	m := NewManager()
+
+	// Environment A: cloud cleanup that will exhaust its bounded retry
+	// budget on this very pass and escalate to attention_required.
+	envA, err := m.Create(root, "alice", "playground", time.Millisecond, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refA := testRef("forgestack-worker-attention")
+	if err := m.TrackCloudResource(root, envA.ID, "alice", refA); err != nil {
+		t.Fatal(err)
+	}
+	cloud := NewFakeCloudClient()
+	cloud.SeedBucket(refA, cloudTags(envA.ID, "alice"), 0, 0, 0)
+	cloud.RemoveErr = errCloudPermanentlyDenied
+
+	// Environment B: an ordinary, still-retryable Docker failure (not
+	// exhausted, no escalation) on the same pass.
+	envB, err := m.Create(root, "bob", "playground", time.Millisecond, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.TrackDockerResource(root, envB.ID, "bob", TrackedDockerResource{Kind: DockerContainer, Ref: "worker-ordinary-retry"}); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC().Add(time.Hour)
+	tick := make(chan time.Time)
+	done, afterPass := passSync()
+	var lastLine string
+	var mu sync.Mutex
+	w := &Worker{
+		Controller: Controller{
+			Manager:                 m,
+			Now:                     func() time.Time { return now },
+			Sleep:                   noSleep,
+			MaxCleanupAttempts:      1,
+			Docker:                  unavailableDockerClient{},
+			Cloud:                   cloud,
+			MaxCloudCleanupAttempts: 1,
+		},
+		Root: root,
+		Tick: tick,
+		Logf: func(format string, args ...any) {
+			mu.Lock()
+			defer mu.Unlock()
+			lastLine = fmt.Sprintf(format, args...)
+		},
+		AfterPass: afterPass,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = w.Run(ctx) }()
+	waitPass(t, done)
+
+	envs, err := ListEnvironments(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gotA, gotB string
+	for _, e := range envs {
+		switch e.ID {
+		case envA.ID:
+			gotA = e.Status
+		case envB.ID:
+			gotB = e.Status
+		}
+	}
+	if gotA != StatusCleanupAttentionRequired {
+		t.Fatalf("expected environment A to escalate to cleanup_attention_required, got %q", gotA)
+	}
+	if gotB == StatusVerifiedClean || gotB == StatusCleanupAttentionRequired {
+		t.Fatalf("expected environment B to be an ordinary, non-escalated retryable failure, got %q", gotB)
+	}
+
+	mu.Lock()
+	line := lastLine
+	mu.Unlock()
+	if !strings.Contains(line, "cleanup_attention_required=1") {
+		t.Fatalf("expected the pass-complete log line to report cleanup_attention_required=1, got %q", line)
+	}
+	if !strings.Contains(line, "cleanup_unverified_or_incomplete=1") {
+		t.Fatalf("expected the pass-complete log line to report cleanup_unverified_or_incomplete=1 (B counted separately from A), got %q", line)
+	}
+}
+
+// TestWorkerWithoutNotifierNeverPersistsReportsOrNotifications proves
+// the opt-in Notifier field (notification.go/cleanup_report.go) is
+// strictly additive: a Worker with Notifier left nil (every other test
+// in this file) behaves with zero new file-system footprint -- no
+// cleanup-reports.json, no notifications.json -- exactly as this
+// package behaved before reporting/notifications existed.
+func TestWorkerWithoutNotifierNeverPersistsReportsOrNotifications(t *testing.T) {
+	root := t.TempDir()
+	m := NewManager()
+	env, err := m.Create(root, "alice", "playground", time.Millisecond, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tick := make(chan time.Time)
+	done, afterPass := passSync()
+	w := &Worker{
+		Controller: Controller{
+			Manager: m,
+			Now:     func() time.Time { return env.ExpiresAt.Add(time.Millisecond) },
+			Sleep:   noSleep,
+		},
+		Root:      root,
+		Tick:      tick,
+		Logf:      func(string, ...any) {},
+		AfterPass: afterPass,
+		// Notifier left nil.
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = w.Run(ctx) }()
+	waitPass(t, done)
+
+	dir := filepath.Join(root, env.ID)
+	for _, name := range []string{"cleanup-reports.json", "notifications.json"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Fatalf("expected no %s with Notifier unset, got err=%v", name, err)
+		}
+	}
+}
+
+// TestWorkerWithNotifierPersistsReportAndSendsNotification proves the
+// opt-in wiring actually works end to end through the real Worker loop
+// (not just the underlying GenerateCleanupReport/SendCleanupNotification
+// functions in isolation): a completed pass with Notifier set generates
+// and durably persists a CleanupReport, and sends exactly one
+// notification of the correct kind.
+func TestWorkerWithNotifierPersistsReportAndSendsNotification(t *testing.T) {
+	root := t.TempDir()
+	m := NewManager()
+	env, err := m.Create(root, "alice", "playground", time.Millisecond, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tick := make(chan time.Time)
+	done, afterPass := passSync()
+	notifier := &FakeNotifier{}
+	w := &Worker{
+		Controller: Controller{
+			Manager: m,
+			Now:     func() time.Time { return env.ExpiresAt.Add(time.Millisecond) },
+			Sleep:   noSleep,
+		},
+		Root:      root,
+		Tick:      tick,
+		Logf:      func(string, ...any) {},
+		AfterPass: afterPass,
+		Notifier:  notifier,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = w.Run(ctx) }()
+	waitPass(t, done)
+
+	reports, err := LoadCleanupReports(root, env.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reports) != 1 || reports[0].Safety != SafetyVerifiedClean {
+		t.Fatalf("expected exactly one persisted VERIFIED CLEAN report, got %+v", reports)
+	}
+	if got := notifier.Count(); got != 1 {
+		t.Fatalf("expected exactly one notification sent, got %d", got)
+	}
+	if notifier.Received()[0].Kind != NotificationVerifiedClean {
+		t.Fatalf("expected a verified_clean notification, got %q", notifier.Received()[0].Kind)
 	}
 }
