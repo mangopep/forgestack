@@ -1,0 +1,101 @@
+{
+  "title": "ForgeStack playground cleanup (LOCAL / SIMULATED)",
+  "description": "Playground environment cleanup, Docker/cloud verification, and notification delivery. Every panel here reflects whatever is actually scraped from this machine's own playground worker --- with the FakeDockerClient/FakeCloudClient test doubles this repository ships, every value is LOCAL and SIMULATED, never independently AWS-verified evidence. See CleanupReport.Simulated (internal/playground/cleanup_report.go) for the same caveat applied to the underlying data this dashboard visualizes.",
+  "schemaVersion": 39,
+  "tags": ["forgestack", "cleanup", "local", "simulated"],
+  "panels": [
+    {
+      "id": 1,
+      "title": "SIMULATED DATA -- not AWS-verified (see panel description)",
+      "type": "text",
+      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 0 },
+      "options": {
+        "mode": "markdown",
+        "content": "**This dashboard shows LOCAL, SIMULATED cleanup telemetry.** No `LiveCloudClient`/`LiveDockerClient` implementation exists in this repository (see `internal/playground/cleanup_report.go`); every number below comes from `FakeDockerClient`/`FakeCloudClient` test doubles or a real local Docker daemon, never a credentialed AWS call. Treat every panel as a correctness/behavior check on this package's own logic, not as evidence about real cloud resources."
+      }
+    },
+    {
+      "id": 2,
+      "title": "Cleanup attempts by domain and outcome (per second)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 2 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (domain, outcome) (rate(cleanup_attempts_total[5m]))",
+          "legendFormat": "{{domain}}/{{outcome}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] }
+    },
+    {
+      "id": 3,
+      "title": "Unresolved environments (current, not a rate)",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 2 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [{ "expr": "cleanup_unresolved_environments" }],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 10 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "title": "Attention-required escalations (total, cumulative)",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 2 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [{ "expr": "cleanup_attention_required_total" }],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "title": "Notification delivery by kind and outcome (per second)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (kind, outcome) (rate(cleanup_notification_total[5m]))",
+          "legendFormat": "{{kind}}/{{outcome}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] }
+    },
+    {
+      "id": 6,
+      "title": "Abandoned notification claims reclaimed (per second)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 10 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        {
+          "expr": "rate(cleanup_claim_recovery_total[5m])",
+          "legendFormat": "claim recoveries/s"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] }
+    }
+  ]
+}
