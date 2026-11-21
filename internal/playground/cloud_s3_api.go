@@ -52,13 +52,19 @@ type S3API interface {
 	// object version, delete marker, and multipart upload this
 	// adapter's own enumeration found has already been removed/aborted.
 	DeleteBucket(ctx context.Context, params *s3.DeleteBucketInput, optFns ...func(*s3.Options)) (*s3.DeleteBucketOutput, error)
+	// HeadBucket checks whether a bucket exists by exact name alone --
+	// never by tag -- used by S3Adapter.Exists. Deliberately a
+	// different call than GetBucketTagging: HeadBucket's whole purpose
+	// is an identity check, so S3Adapter.Exists never depends on tag-
+	// read permissions or a bucket's tag state to answer "is it there."
+	HeadBucket(ctx context.Context, params *s3.HeadBucketInput, optFns ...func(*s3.Options)) (*s3.HeadBucketOutput, error)
 }
 
 // This is a compile-time-only type assertion: it proves *s3.Client
 // satisfies S3API exactly as written above, without ever constructing
 // one (nil pointer, never dereferenced, never dialed) and without this
 // package importing aws-sdk-go-v2/config or resolving any credential.
-// If a future SDK release changes any of these seven methods' shape,
+// If a future SDK release changes any of these eight methods' shape,
 // this line -- not a runtime failure somewhere else -- is what breaks
 // the build.
 var _ S3API = (*s3.Client)(nil)

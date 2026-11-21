@@ -15,29 +15,71 @@ type CloudReconciliation struct {
 	CloudAvailable bool               `json:"cloud_available"`
 	Tracked        []CloudResourceRef `json:"tracked"`
 	// Present is every resource the client reports under this
-	// environment's tag, regardless of whether it was tracked.
+	// environment's tag, regardless of whether it was tracked. This is
+	// TAG-BASED discovery only -- orphan auditing stays scoped to it
+	// deliberately (see Orphaned) -- it is never, on its own, used to
+	// decide a TRACKED resource is gone; see Missing/OwnershipChanged/
+	// Unverifiable for that.
 	Present []CloudResourceRef `json:"present"`
 	// Orphaned is present in the cloud, under this environment's own
-	// tag, but never recorded as tracked.
+	// tag, but never recorded as tracked. Audit-only evidence: nothing
+	// in this package ever removes an Orphaned resource automatically
+	// on the strength of a matching tag alone -- RemoveTrackedCloudResources
+	// only ever acts on Tracked resources, and still independently
+	// re-verifies ownership immediately before each one.
 	Orphaned []CloudResourceRef `json:"orphaned,omitempty"`
-	// Missing is tracked but no longer present -- removed by something
-	// other than this package, or never actually created.
+	// Missing is tracked, NOT found by tag-based discovery, AND
+	// independently confirmed absent by exact identity
+	// (CloudClient.Exists) -- removed by something other than this
+	// package, or never actually created. A resource that merely fails
+	// the TAG query is never placed here on that basis alone; see
+	// OwnershipChanged and Unverifiable for the other two outcomes an
+	// exact-identity check can produce.
 	Missing []CloudResourceRef `json:"missing,omitempty"`
+	// OwnershipChanged is tracked, NOT found by tag-based discovery, but
+	// CloudClient.Exists confirms it still exists -- its ownership tags
+	// (environment-id, owner, and/or managed-by) have changed or been
+	// removed since this package last tracked it. THIS IS THE FIX for
+	// the original fail-open bug: previously, a resource in exactly this
+	// state was silently (and wrongly) classified Missing, letting
+	// Clean() report true -- and therefore the environment reach
+	// StatusVerifiedClean -- while the real resource was still fully
+	// present. Never auto-removed (RemoveTrackedCloudResources only acts
+	// on tag-discovered Present resources), never counted as Clean();
+	// reported loudly in CleanupReport.Resources instead (see
+	// addCloudResourceReports, cleanup_report.go) so a human can
+	// investigate.
+	OwnershipChanged []CloudResourceRef `json:"ownership_changed,omitempty"`
+	// Unverifiable is tracked, NOT found by tag-based discovery, and
+	// CloudClient.Exists itself could not complete (throttling,
+	// credential failure, access denied, an unrecognized response) --
+	// fail closed: never counted as Missing, never counted as Clean().
+	Unverifiable []CloudResourceRef `json:"unverifiable,omitempty"`
 }
 
-// Clean reports whether cloud reconciliation found nothing live at all.
-// Reconciliation that could not run at all (CloudAvailable == false) is
-// never "clean": the absence of evidence is not evidence of absence.
+// Clean reports whether cloud reconciliation found nothing live, and
+// nothing merely unresolved, at all. Reconciliation that could not run
+// at all (CloudAvailable == false) is never "clean": the absence of
+// evidence is not evidence of absence. Nor is a tracked resource whose
+// ownership has changed (still physically there) or whose exact-identity
+// check could not complete (genuinely unknown) -- both are strictly
+// MORE conservative than the original "tag query found nothing" rule,
+// never less: this fixes a fail-open bug by narrowing when Clean() can
+// ever report true, not by widening it.
 func (r CloudReconciliation) Clean() bool {
-	return r.CloudAvailable && len(r.Present) == 0
+	return r.CloudAvailable && len(r.Present) == 0 && len(r.OwnershipChanged) == 0 && len(r.Unverifiable) == 0
 }
 
 // CloudReconcile independently compares id's tracked cloud resources
-// against what client reports present for CloudTagEnvironmentID == id.
-// Unavailability (throttling, credential failure, network error) is
-// reported as CloudAvailable: false, never as an empty-looking clean
-// result -- a caller must be able to tell "nothing found" apart from
-// "couldn't check."
+// against what client reports present for CloudTagEnvironmentID == id,
+// AND, for every tracked resource tag-based discovery does NOT surface,
+// independently re-checks it by exact identity (CloudClient.Exists)
+// before ever believing it is gone -- see OwnershipChanged's doc
+// comment for exactly why this second check exists. Unavailability
+// (throttling, credential failure, network error) on the initial
+// ListByTag call is reported as CloudAvailable: false, never as an
+// empty-looking clean result -- a caller must be able to tell "nothing
+// found" apart from "couldn't check."
 func CloudReconcile(ctx context.Context, client CloudClient, root, id string) (CloudReconciliation, error) {
 	rootPath, err := filepath.Abs(root)
 	if err != nil {
@@ -73,8 +115,27 @@ func CloudReconcile(ctx context.Context, client CloudClient, root, id string) (C
 		}
 	}
 	for _, t := range tracked {
-		if !presentSet[t] {
+		if presentSet[t] {
+			// Tag-based discovery already confirms this one is here
+			// and still carries our tag -- nothing further to check.
+			continue
+		}
+		// NOT found by tag. Independently verify by exact identity
+		// (never by tag) before concluding anything -- this is the
+		// check that distinguishes "genuinely gone" from "still there,
+		// but detagged," which the tag query alone cannot tell apart.
+		exists, existsErr := client.Exists(ctx, t)
+		switch {
+		case existsErr != nil:
+			if isCloudUnavailable(existsErr) {
+				rec.Unverifiable = append(rec.Unverifiable, t)
+				continue
+			}
+			return CloudReconciliation{}, fmt.Errorf("check existence of %s: %w", t.Ref, existsErr)
+		case !exists:
 			rec.Missing = append(rec.Missing, t)
+		default:
+			rec.OwnershipChanged = append(rec.OwnershipChanged, t)
 		}
 	}
 	return rec, nil

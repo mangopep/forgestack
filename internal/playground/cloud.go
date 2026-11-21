@@ -134,6 +134,25 @@ type CloudClient interface {
 	// removal, and this closes that window with one more independent
 	// read right before anything is deleted.
 	VerifyOwnership(ctx context.Context, ref CloudResourceRef, requiredTags map[string]string) (bool, error)
+	// Exists reports whether ref currently exists at all, by EXACT
+	// identity (account+region+kind+ref) only -- completely independent
+	// of tags, ownership, and ListByTag-based discovery. This is the fix
+	// for CloudReconcile's original fail-open bug: ListByTag cannot find
+	// a resource whose tags were changed or removed, so a tracked
+	// resource that is still very much alive but no longer carries this
+	// package's own tags would otherwise be silently (and wrongly)
+	// classified "Missing." Exists is the independent, tag-blind check
+	// that catches exactly that case: CloudReconcile calls it for every
+	// tracked resource ListByTag's tag-scoped query does not surface, so
+	// "not found by tag" and "confirmed gone" are never conflated.
+	//
+	// Returns (false, nil) ONLY when the provider unambiguously confirms
+	// ref does not exist. Any error this implementation cannot classify
+	// that way -- throttling, credential failure, access denied, an
+	// unrecognized response -- MUST be returned as a non-nil error,
+	// never collapsed into (false, nil): fail closed, exactly like
+	// VerifyOwnership and ListByTag already must.
+	Exists(ctx context.Context, ref CloudResourceRef) (bool, error)
 	// Remove empties (if needed: object versions, delete markers, and
 	// in-progress multipart uploads for an S3 bucket) and deletes ref.
 	// Must return ErrCloudBucketNotEmpty rather than a generic error if

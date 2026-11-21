@@ -237,6 +237,40 @@ func (a *S3Adapter) VerifyOwnership(ctx context.Context, ref CloudResourceRef, r
 	return true, nil
 }
 
+// Exists implements CloudClient.Exists for S3 buckets: a HeadBucket
+// call by exact bucket name alone -- never GetBucketTagging, never
+// ListByTag -- so this answer is completely independent of the
+// bucket's current tag state. This is what lets CloudReconcile tell
+// "genuinely deleted" apart from "still exists but its tags no longer
+// match this package's own records" (cloud_reconcile.go).
+func (a *S3Adapter) Exists(ctx context.Context, ref CloudResourceRef) (bool, error) {
+	if err := ValidateCloudResourceKind(ref.Kind); err != nil {
+		return false, err
+	}
+	if err := a.checkScope(ref); err != nil {
+		return false, err
+	}
+	_, err := a.API.HeadBucket(ctx, &s3.HeadBucketInput{
+		Bucket:              strPtr(ref.Ref),
+		ExpectedBucketOwner: strPtr(a.Account),
+	})
+	if err == nil {
+		return true, nil
+	}
+	switch s3ErrorCode(err) {
+	case "NoSuchBucket", "NotFound":
+		return false, nil
+	}
+	// AccessDenied, throttling, credential failure, or anything this
+	// adapter does not specifically recognize: fail closed -- never
+	// report "confirmed absent" for an ambiguous response. See
+	// classifyS3Error's own doc comment for why AccessDenied in
+	// particular could mean "wrong account" (ExpectedBucketOwner
+	// correctly refusing) as easily as a real permission problem --
+	// either way, never "gone."
+	return false, classifyS3Error("HeadBucket", err)
+}
+
 // emptyBucket removes every object version and delete marker, and
 // aborts every in-progress multipart upload, this adapter's own
 // enumeration finds for bucket -- never anything else, never a

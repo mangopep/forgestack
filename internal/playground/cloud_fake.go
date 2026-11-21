@@ -46,6 +46,11 @@ type FakeCloudClient struct {
 	// and without a network call or a clock.
 	ListErr            error
 	VerifyOwnershipErr error
+	// ExistsErr, if set, is returned by every Exists call instead of
+	// checking the fake's own state -- for simulating AccessDenied/
+	// throttling/credential-expiry on the exact-identity existence
+	// check itself, independent of ListByTag/VerifyOwnership.
+	ExistsErr error
 	// RemoveErr, if set, is returned by every Remove call instead of
 	// actually removing anything.
 	RemoveErr error
@@ -193,6 +198,21 @@ func (f *FakeCloudClient) VerifyOwnership(_ context.Context, ref CloudResourceRe
 		}
 	}
 	return true, nil
+}
+
+// Exists checks ref by exact identity ONLY -- the map is keyed by the
+// full CloudResourceRef, never by tags -- so a bucket whose tags have
+// been changed or removed via DriftTag still reports Exists == true
+// here, exactly like a real HeadBucket-style check would.
+func (f *FakeCloudClient) Exists(_ context.Context, ref CloudResourceRef) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "Exists:"+ref.Ref)
+	if f.ExistsErr != nil {
+		return false, f.ExistsErr
+	}
+	_, ok := f.buckets[ref]
+	return ok, nil
 }
 
 func (f *FakeCloudClient) Remove(_ context.Context, ref CloudResourceRef) error {

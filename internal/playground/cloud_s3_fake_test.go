@@ -65,6 +65,7 @@ type FakeS3API struct {
 	ListMultipartUploadsErr error
 	AbortMultipartUploadErr error
 	DeleteBucketErr         error
+	HeadBucketErr           map[string]error // keyed by bucket name, for S3Adapter.Exists tests
 
 	// DeleteObjectsPartialFailures makes specific "key/versionID" pairs
 	// come back as a per-item types.Error inside an otherwise-successful
@@ -463,6 +464,28 @@ func (f *FakeS3API) DeleteBucket(_ context.Context, params *s3.DeleteBucketInput
 	}
 	delete(f.buckets, name)
 	return &s3.DeleteBucketOutput{}, nil
+}
+
+// HeadBucket checks existence by EXACT bucket name alone, deliberately
+// never consulting tags -- exactly matching the real HeadBucket API's
+// own semantics and giving S3Adapter.Exists something tag-blind to
+// call.
+func (f *FakeS3API) HeadBucket(_ context.Context, params *s3.HeadBucketInput, _ ...func(*s3.Options)) (*s3.HeadBucketOutput, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	name := strVal(params.Bucket)
+	f.calls = append(f.calls, "HeadBucket:"+name)
+	if err := f.HeadBucketErr[name]; err != nil {
+		return nil, err
+	}
+	b, ok := f.buckets[name]
+	if !ok {
+		return nil, apiErr("NoSuchBucket", "The specified bucket does not exist")
+	}
+	if err := f.checkExpectedOwner(params.ExpectedBucketOwner, b); err != nil {
+		return nil, err
+	}
+	return &s3.HeadBucketOutput{}, nil
 }
 
 var _ S3API = (*FakeS3API)(nil)

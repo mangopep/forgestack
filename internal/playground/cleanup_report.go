@@ -443,7 +443,24 @@ func (c Controller) addCloudResourceReports(ctx context.Context, root string, en
 			ConsoleURL: consoleURLForCloudResource(res, false),
 		})
 	}
-	return rec.CloudAvailable && len(rec.Present) > 0, !rec.CloudAvailable
+	for _, res := range rec.OwnershipChanged {
+		report.Resources = append(report.Resources, ResourceReport{
+			Domain: "cloud", Kind: string(res.Kind), Account: res.Account, Region: res.Region, Ref: res.Ref,
+			Present: true, Verified: rec.CloudAvailable, Tracked: true, VerifiedAt: now,
+			ConsoleURL: consoleURLForCloudResource(res, true),
+			Error:      "still exists but its ownership tags no longer match this environment's tracked record -- never auto-removed, needs investigation",
+		})
+	}
+	for _, res := range rec.Unverifiable {
+		report.Resources = append(report.Resources, ResourceReport{
+			Domain: "cloud", Kind: string(res.Kind), Account: res.Account, Region: res.Region, Ref: res.Ref,
+			Present: false, Verified: false, Tracked: true, VerifiedAt: now,
+			Error: "exact-identity existence check could not be completed for this tracked resource",
+		})
+	}
+	anyPresentOrChanged := len(rec.Present) > 0 || len(rec.OwnershipChanged) > 0
+	anyUnverifiable := !rec.CloudAvailable || len(rec.Unverifiable) > 0
+	return rec.CloudAvailable && anyPresentOrChanged, anyUnverifiable
 }
 
 func errString(err error) string {
