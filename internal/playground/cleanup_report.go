@@ -186,8 +186,19 @@ type CleanupReport struct {
 	// domain configured at all (local-only) is never Simulated: the
 	// local filesystem check is always a real, direct read, never a
 	// fake.
-	Simulated bool             `json:"simulated"`
-	Resources []ResourceReport `json:"resources"`
+	Simulated bool `json:"simulated"`
+	// CloudEscalationEpisode is the environment's current cloud-cleanup
+	// escalation-episode counter (cloudCleanupAttemptState.Episode,
+	// cloud_retry.go) at the moment this report was generated -- read
+	// read-only here, never derived from this report's own checks. It exists
+	// so notification.go's notificationID can key the
+	// attention_required notification to the CURRENT escalation,
+	// distinguishing a repeat escalation (after a ResetCloudCleanupAttempts
+	// reset) from the first one rather than silently colliding with it.
+	// Always 0 for an environment that has never escalated, and
+	// meaningless for any Outcome other than StatusCleanupAttentionRequired.
+	CloudEscalationEpisode int              `json:"cloud_escalation_episode,omitempty"`
+	Resources              []ResourceReport `json:"resources"`
 	// Errors collects whole-domain failures (a Reconcile/CloudReconcile
 	// call itself erroring, not merely reporting unavailable) and the
 	// cleanup attempt's own error, if any -- formatted as strings so
@@ -198,9 +209,10 @@ type CleanupReport struct {
 
 // GenerateCleanupReport builds a CleanupReport for env's CURRENT
 // persisted state by independently re-reading (read-only, NEVER
-// mutating anything -- never touches environment.json,
+// mutating anything -- never WRITES environment.json,
 // cloud-cleanup-state.json, docker-resources.json, or
-// cloud-resources.json) each domain's reconciliation. It reuses
+// cloud-resources.json; it does read cloud-cleanup-state.json, purely
+// to populate CloudEscalationEpisode) each domain's reconciliation. It reuses
 // Reconcile/CloudReconcile -- the exact same read-only functions
 // Controller.verifyAdditionalDomains' own cleanup decision is built on
 // -- rather than re-deriving "is this clean" from any new logic.
@@ -245,6 +257,16 @@ func (c Controller) GenerateCleanupReport(ctx context.Context, root string, env 
 	}
 	if cleanupErr != nil {
 		report.Errors = append(report.Errors, cleanupErr.Error())
+	}
+
+	if episode, err := currentCloudEscalationEpisode(root, env.ID); err != nil {
+		// Visible but non-fatal: see notificationID's doc comment --
+		// worst case on a misread here is a notification-dedup
+		// collision, never an unsafe cleanup decision (this report's
+		// Safety field above is computed independently of Episode).
+		report.Errors = append(report.Errors, fmt.Sprintf("cloud escalation episode unreadable: %s", err))
+	} else {
+		report.CloudEscalationEpisode = episode
 	}
 
 	localPresent, localErr := localResourcesPresent(root, env.ID)

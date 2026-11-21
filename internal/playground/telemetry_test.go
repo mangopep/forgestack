@@ -542,7 +542,7 @@ func TestClaimRecoveryMetric_IncrementsOnlyOnAbandonedClaimReclaim(t *testing.T)
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	n := Notification{ID: notificationID(env.ID, NotificationVerifiedClean), EnvironmentID: env.ID, Kind: NotificationVerifiedClean, CreatedAt: now}
+	n := Notification{ID: notificationID(env.ID, NotificationVerifiedClean, 0), EnvironmentID: env.ID, Kind: NotificationVerifiedClean, CreatedAt: now}
 	if _, _, claimed, _, err := claimNotification(root, n, now); err != nil || !claimed {
 		t.Fatalf("test setup: expected a fresh claim, claimed=%v err=%v", claimed, err)
 	}

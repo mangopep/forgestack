@@ -11,13 +11,25 @@ import (
 // "delivered" NotificationRecord for kind -- a cheap, read-only check
 // used by ReconcileCleanupNotifications to decide whether an
 // environment still needs a report generated/notification attempted at
-// all this pass.
+// all this pass. For kind == NotificationAttentionRequired this must
+// read id's CURRENT escalation episode first (notificationID.go) --
+// otherwise a repeat escalation after a ResetCloudCleanupAttempts reset
+// would be checked against the FIRST escalation's already-delivered ID
+// and wrongly skipped before a report is even generated.
 func hasDeliveredNotification(root, id string, kind NotificationKind) (bool, error) {
+	episode := 0
+	if kind == NotificationAttentionRequired {
+		ep, err := currentCloudEscalationEpisode(root, id)
+		if err != nil {
+			return false, err
+		}
+		episode = ep
+	}
 	records, err := LoadNotificationRecords(root, id)
 	if err != nil {
 		return false, err
 	}
-	idx := findRecord(records, notificationID(id, kind))
+	idx := findRecord(records, notificationID(id, kind, episode))
 	return idx >= 0 && records[idx].Status == notificationStatusDelivered, nil
 }
 

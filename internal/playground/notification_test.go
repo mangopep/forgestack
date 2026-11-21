@@ -390,7 +390,7 @@ func TestSendCleanupNotification_AbandonedClaimIsReclaimedAfterLeaseExpires(t *t
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	n := Notification{ID: notificationID(env.ID, NotificationAttentionRequired), EnvironmentID: env.ID, Kind: NotificationAttentionRequired, CreatedAt: now}
+	n := Notification{ID: notificationID(env.ID, NotificationAttentionRequired, 0), EnvironmentID: env.ID, Kind: NotificationAttentionRequired, CreatedAt: now}
 
 	// Simulate a crash during delivery: claim it, then never finalize.
 	_, delivered, claimed, _, err := claimNotification(root, n, now)

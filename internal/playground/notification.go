@@ -63,17 +63,29 @@ func notificationKindFor(report CleanupReport) (NotificationKind, bool) {
 // recover purely from persisted state after any crash, with no
 // reliance on a particular pass's transient result list.
 //
-// Documented limitation: because the key has no time/generation
-// component, an environment that reaches StatusCleanupAttentionRequired,
-// is reset via ResetCloudCleanupAttempts, and later escalates to
-// StatusCleanupAttentionRequired a SECOND time reuses the same ID as
-// the first escalation -- the second escalation's notification is
-// therefore already "delivered" and is not re-sent. This is a known,
-// accepted tradeoff for this increment, not an oversight; closing it
-// would require threading an attempt-generation counter (e.g. from
-// cloud-cleanup-state.json) into the key, which is out of this
-// increment's scope (notification.go/cleanup_report.go/worker.go only).
-func notificationID(environmentID string, kind NotificationKind) string {
+// episode, for kind == NotificationAttentionRequired only, is the
+// environment's current escalation-episode counter
+// (cloudCleanupAttemptState.Episode, cloud_retry.go) -- threaded into
+// the key so that an environment which reaches
+// StatusCleanupAttentionRequired, is reset via ResetCloudCleanupAttempts
+// (which increments Episode), and later escalates a SECOND time gets a
+// distinct, never-before-seen ID rather than silently colliding with
+// the first escalation's already-"delivered" record. This closes the
+// repeat-escalation limitation this doc comment used to describe as an
+// accepted tradeoff; see
+// TestResetCloudCleanupAttempts_SecondEscalationGetsItsOwnNotification.
+//
+// episode is ignored for every other kind: NotificationVerifiedClean
+// and NotificationCleanupIncomplete have no comparable "distinct episode"
+// concept -- a report regenerated mid-retry for the same still-ongoing
+// cleanup_incomplete/cleanup_unverified condition is deliberately the
+// SAME notifiable event, not a new one, so including episode there
+// would reopen the exact "undecidable after a crash" problem the
+// stable, timestamp-free key was introduced to solve.
+func notificationID(environmentID string, kind NotificationKind, episode int) string {
+	if kind == NotificationAttentionRequired {
+		return fmt.Sprintf("%s:%s:%d", environmentID, kind, episode)
+	}
 	return fmt.Sprintf("%s:%s", environmentID, kind)
 }
 
@@ -425,7 +437,7 @@ func SendCleanupNotification(ctx context.Context, root string, report CleanupRep
 	}
 
 	n := Notification{
-		ID:            notificationID(report.EnvironmentID, kind),
+		ID:            notificationID(report.EnvironmentID, kind, report.CloudEscalationEpisode),
 		EnvironmentID: report.EnvironmentID,
 		Kind:          kind,
 		Report:        report,

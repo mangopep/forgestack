@@ -2,6 +2,7 @@ package playground
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 )
@@ -320,5 +321,285 @@ func TestCloudCleanup_SuccessClearsAttemptHistory(t *testing.T) {
 	}
 	if state.Attempts != 0 {
 		t.Errorf("expected attempt history to be cleared on success, got %+v", state)
+	}
+}
+
+// Permanent regression tests for the repeat-escalation notification bug:
+// notificationID used to be keyed only by (environmentID, kind), with no
+// generation component, so a SECOND escalation to
+// StatusCleanupAttentionRequired after a ResetCloudCleanupAttempts reset
+// reused the FIRST escalation's already-"delivered" notification ID and
+// was silently suppressed. The fix threads a persisted, durable episode
+// counter (cloudCleanupAttemptState.Episode) into the key, bumped only
+// by ResetCloudCleanupAttempts.
+
+// TestResetCloudCleanupAttempts_SecondEscalationGetsItsOwnNotification is
+// the core repeat-escalation regression test: escalate, notify, reset,
+// escalate again, notify again -- the second notification must actually
+// be delivered, as a DISTINCT record, with the first escalation's
+// delivered record untouched (preserved audit history).
+func TestResetCloudCleanupAttempts_SecondEscalationGetsItsOwnNotification(t *testing.T) {
+	root := t.TempDir()
+	m := NewManager()
+	env, err := m.Create(root, "alice", "playground", time.Second, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := testRef("forgestack-repeat-escalation")
+	if err := m.TrackCloudResource(root, env.ID, "alice", ref); err != nil {
+		t.Fatal(err)
+	}
+	fake := NewFakeCloudClient()
+	fake.SeedBucket(ref, cloudTags(env.ID, "alice"), 0, 0, 0)
+	fake.RemoveErr = errCloudPermanentlyDenied
+
+	now := env.ExpiresAt.Add(time.Millisecond)
+	c := Controller{
+		Manager:                 m,
+		Now:                     func() time.Time { return now },
+		Sleep:                   noSleep,
+		MaxCleanupAttempts:      1,
+		Cloud:                   fake,
+		MaxCloudCleanupAttempts: 1,
+	}
+	if _, err := c.ExpireDue(root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.CleanupDue(context.Background(), root); err == nil {
+		t.Fatal("expected the first (and only permitted) attempt to fail and escalate")
+	}
+	envs, err := ListEnvironments(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if envs[0].Status != StatusCleanupAttentionRequired {
+		t.Fatalf("expected first escalation, got %q", envs[0].Status)
+	}
+
+	notifier := &FakeNotifier{}
+	firstReport, err := c.GenerateCleanupReport(context.Background(), root, envs[0], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstReport.CloudEscalationEpisode != 0 {
+		t.Fatalf("expected the first escalation's report to carry episode 0, got %d", firstReport.CloudEscalationEpisode)
+	}
+	sent, err := SendCleanupNotification(context.Background(), root, firstReport, notifier, now, nil)
+	if err != nil || !sent {
+		t.Fatalf("expected the first escalation's notification to be sent, sent=%v err=%v", sent, err)
+	}
+	if notifier.Count() != 1 {
+		t.Fatalf("expected exactly one delivery after the first escalation, got %d", notifier.Count())
+	}
+
+	// Human resets -- this must bump the episode, not just clear attempts.
+	if err := ResetCloudCleanupAttempts(root, env.ID, "alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Escalate a SECOND time (fake.RemoveErr is still permanent, and the
+	// budget is 1 again after reset).
+	if _, err := c.CleanupDue(context.Background(), root); err == nil {
+		t.Fatal("expected the second escalation attempt to fail and escalate again")
+	}
+	envs, err = ListEnvironments(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if envs[0].Status != StatusCleanupAttentionRequired {
+		t.Fatalf("expected second escalation, got %q", envs[0].Status)
+	}
+
+	secondReport, err := c.GenerateCleanupReport(context.Background(), root, envs[0], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secondReport.CloudEscalationEpisode != 1 {
+		t.Fatalf("expected the second escalation's report to carry episode 1, got %d", secondReport.CloudEscalationEpisode)
+	}
+
+	sent, err = SendCleanupNotification(context.Background(), root, secondReport, notifier, now, nil)
+	if err != nil || !sent {
+		t.Fatalf("THE BUG: expected the second escalation's notification to be sent as a NEW event, sent=%v err=%v", sent, err)
+	}
+	if notifier.Count() != 2 {
+		t.Fatalf("expected exactly two distinct deliveries across both escalations, got %d", notifier.Count())
+	}
+
+	// Audit history: both escalations must have their own durable,
+	// delivered record -- the first one's is never overwritten or lost.
+	records, err := LoadNotificationRecords(root, env.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantIDs := map[string]bool{
+		notificationID(env.ID, NotificationAttentionRequired, 0): false,
+		notificationID(env.ID, NotificationAttentionRequired, 1): false,
+	}
+	for _, rec := range records {
+		if _, ok := wantIDs[rec.ID]; ok {
+			if rec.Status != notificationStatusDelivered {
+				t.Errorf("expected record %s to be delivered, got status %q", rec.ID, rec.Status)
+			}
+			wantIDs[rec.ID] = true
+		}
+	}
+	for id, found := range wantIDs {
+		if !found {
+			t.Errorf("expected a preserved, delivered audit record for %s", id)
+		}
+	}
+}
+
+// TestReconcileCleanupNotifications_RecoversSecondEscalationAfterRestart
+// is the restart-recovery regression test: a completely fresh Controller
+// (simulating a new process with no in-memory state) must independently
+// derive the CURRENT escalation episode from persisted state and still
+// deliver the second escalation's notification via
+// ReconcileCleanupNotifications -- the same crash-recovery path Worker
+// uses, exercising hasDeliveredNotification's episode-aware pre-check.
+func TestReconcileCleanupNotifications_RecoversSecondEscalationAfterRestart(t *testing.T) {
+	root := t.TempDir()
+	m := NewManager()
+	env, err := m.Create(root, "alice", "playground", time.Second, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := testRef("forgestack-restart-escalation")
+	if err := m.TrackCloudResource(root, env.ID, "alice", ref); err != nil {
+		t.Fatal(err)
+	}
+	fake := NewFakeCloudClient()
+	fake.SeedBucket(ref, cloudTags(env.ID, "alice"), 0, 0, 0)
+	fake.RemoveErr = errCloudPermanentlyDenied
+
+	now := env.ExpiresAt.Add(time.Millisecond)
+	c := Controller{
+		Manager:                 m,
+		Now:                     func() time.Time { return now },
+		Sleep:                   noSleep,
+		MaxCleanupAttempts:      1,
+		Cloud:                   fake,
+		MaxCloudCleanupAttempts: 1,
+	}
+	if _, err := c.ExpireDue(root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.CleanupDue(context.Background(), root); err == nil {
+		t.Fatal("expected the first attempt to fail and escalate")
+	}
+
+	notifier := &FakeNotifier{}
+	if _, err := c.ReconcileCleanupNotifications(context.Background(), root, notifier, now); err != nil {
+		t.Fatal(err)
+	}
+	if notifier.Count() != 1 {
+		t.Fatalf("expected exactly one delivery after the first escalation, got %d", notifier.Count())
+	}
+
+	if err := ResetCloudCleanupAttempts(root, env.ID, "alice"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.CleanupDue(context.Background(), root); err == nil {
+		t.Fatal("expected the second attempt to fail and escalate again")
+	}
+
+	// Simulate a restart: a brand-new Controller/Manager/Notifier, no
+	// shared memory with anything above -- only persisted state on disk.
+	freshNotifier := &FakeNotifier{}
+	fresh := Controller{Manager: NewManager()}
+	if _, err := fresh.ReconcileCleanupNotifications(context.Background(), root, freshNotifier, now); err != nil {
+		t.Fatal(err)
+	}
+	if freshNotifier.Count() != 1 {
+		t.Fatalf("expected the fresh process to independently deliver the second escalation's notification exactly once, got %d", freshNotifier.Count())
+	}
+	got := freshNotifier.Received()[0]
+	if got.ID != notificationID(env.ID, NotificationAttentionRequired, 1) {
+		t.Errorf("expected the recovered notification to carry the second escalation's episode-1 ID, got %q", got.ID)
+	}
+
+	// Calling it again must not re-deliver anything -- idempotent.
+	if _, err := fresh.ReconcileCleanupNotifications(context.Background(), root, freshNotifier, now); err != nil {
+		t.Fatal(err)
+	}
+	if freshNotifier.Count() != 1 {
+		t.Fatalf("expected no additional delivery on a repeated reconcile call, got %d", freshNotifier.Count())
+	}
+}
+
+// TestSendCleanupNotification_AttentionRequiredWithinSameEpisodeIsNeverResent
+// is the duplicate-suppression regression test: multiple calls for the
+// SAME escalation episode (no reset in between) must never deliver more
+// than once, exactly like every other notification kind already
+// guarantees -- the episode-aware key must not accidentally weaken
+// within-episode idempotency.
+func TestSendCleanupNotification_AttentionRequiredWithinSameEpisodeIsNeverResent(t *testing.T) {
+	root := t.TempDir()
+	m := NewManager()
+	env, err := m.Create(root, "alice", "playground", time.Minute, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	report := reportWithOutcome(env.ID, StatusCleanupAttentionRequired, SafetyActionRequired, now)
+	report.CloudEscalationEpisode = 3 // arbitrary non-zero episode
+	notifier := &FakeNotifier{}
+
+	for i := 0; i < 5; i++ {
+		sent, err := SendCleanupNotification(context.Background(), root, report, notifier, now.Add(time.Duration(i)*time.Minute), nil)
+		if err != nil || !sent {
+			t.Fatalf("call %d: expected sent=true err=nil, got sent=%v err=%v", i, sent, err)
+		}
+	}
+	if notifier.Count() != 1 {
+		t.Fatalf("expected exactly one real delivery across five repeated calls for the same episode, got %d", notifier.Count())
+	}
+}
+
+// TestSendCleanupNotification_ConcurrentAttentionRequiredCallsNeverDoubleDeliver
+// is the concurrent-delivery regression test for the episode-aware key:
+// many goroutines racing to send the SAME escalation's notification must
+// still result in exactly one real delivery, exercising the existing
+// claim/lease machinery (notification.go) with a non-zero,
+// attention_required-specific ID.
+func TestSendCleanupNotification_ConcurrentAttentionRequiredCallsNeverDoubleDeliver(t *testing.T) {
+	root := t.TempDir()
+	m := NewManager()
+	env, err := m.Create(root, "alice", "playground", time.Minute, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	report := reportWithOutcome(env.ID, StatusCleanupAttentionRequired, SafetyActionRequired, now)
+	report.CloudEscalationEpisode = 2
+	notifier := &FakeNotifier{}
+
+	var wg sync.WaitGroup
+	results := make([]bool, 8)
+	for g := 0; g < 8; g++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			sent, err := SendCleanupNotification(context.Background(), root, report, notifier, now, nil)
+			if err != nil {
+				t.Errorf("goroutine %d: unexpected error: %v", i, err)
+				return
+			}
+			results[i] = sent
+		}(g)
+	}
+	wg.Wait()
+
+	if notifier.Count() != 1 {
+		t.Fatalf("expected exactly one real delivery across 8 concurrent callers, got %d", notifier.Count())
+	}
+	records, err := LoadNotificationRecords(root, env.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx := findRecord(records, notificationID(env.ID, NotificationAttentionRequired, 2))
+	if idx < 0 || records[idx].Status != notificationStatusDelivered {
+		t.Fatalf("expected a single delivered record for episode 2, got %+v", records)
 	}
 }
