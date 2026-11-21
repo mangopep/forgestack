@@ -1,12 +1,14 @@
 package playground
 
 import (
+	"bytes"
 	"context"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 // This file is the full offline S3Adapter-to-telemetry end-to-end test:
@@ -65,6 +67,26 @@ func TestS3AdapterEndToEnd_FullLifecycleThroughTelemetry(t *testing.T) {
 	if _, err := c.ExpireDue(root); err != nil {
 		t.Fatal(err)
 	}
+	cleanEnv := runAndVerifyFullLifecycleCleanup(t, c, api, adapter, root, env.ID, ref)
+	reportAndNotifyFullLifecycle(t, c, root, cleanEnv, notifier, metrics)
+
+	// Metrics: a real cleanup attempt against the cloud domain, through
+	// S3Adapter, must be counted exactly like a FakeCloudClient-backed
+	// one would be -- the Controller is unaware which implementation is
+	// behind c.Cloud.
+	assertFullLifecycleMetrics(t, reg, metrics, root)
+	assertFullLifecycleSpans(t, spans, env.ID)
+	assertFullLifecycleLogs(t, logs, env.ID)
+}
+
+// runAndVerifyFullLifecycleCleanup runs ExpireDue/CleanupDue through c
+// and independently re-verifies absence via a fresh CloudReconcile call
+// (never trusting Remove's own return value alone), returning the
+// resulting Environment for the caller's report/notify step. Factored
+// out of TestS3AdapterEndToEnd_FullLifecycleThroughTelemetry purely to
+// keep that test's own cyclomatic complexity readable.
+func runAndVerifyFullLifecycleCleanup(t *testing.T, c Controller, api *FakeS3API, adapter *S3Adapter, root, environmentID string, ref CloudResourceRef) Environment {
+	t.Helper()
 	results, err := c.CleanupDue(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
@@ -81,18 +103,25 @@ func TestS3AdapterEndToEnd_FullLifecycleThroughTelemetry(t *testing.T) {
 	if api.HasBucket(ref.Ref) {
 		t.Fatal("expected the S3 bucket to actually be gone from the backing store")
 	}
-	rec, err := CloudReconcile(context.Background(), adapter, root, env.ID)
+	rec, err := CloudReconcile(context.Background(), adapter, root, environmentID)
 	if err != nil {
 		t.Fatalf("independent post-cleanup reconcile failed: %v", err)
 	}
 	if len(rec.Present) != 0 {
 		t.Fatalf("expected independent reconciliation to confirm nothing present, got %+v", rec.Present)
 	}
+	return results[0].Environment
+}
 
-	// Persist and notify, exactly like ReconcileCleanupNotifications
-	// does -- exercising cleanup_report.go and notification.go through
-	// the real S3Adapter's VerificationMode, not a hand-built report.
-	report, err := c.GenerateCleanupReport(context.Background(), root, results[0].Environment, nil)
+// reportAndNotifyFullLifecycle persists a fresh CleanupReport and sends
+// its notification, exactly like ReconcileCleanupNotifications does --
+// exercising cleanup_report.go and notification.go through the real
+// S3Adapter's VerificationMode, not a hand-built report. Factored out of
+// TestS3AdapterEndToEnd_FullLifecycleThroughTelemetry purely to keep
+// that test's own cyclomatic complexity readable.
+func reportAndNotifyFullLifecycle(t *testing.T, c Controller, root string, env Environment, notifier *FakeNotifier, metrics *Metrics) {
+	t.Helper()
+	report, err := c.GenerateCleanupReport(context.Background(), root, env, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,11 +144,14 @@ func TestS3AdapterEndToEnd_FullLifecycleThroughTelemetry(t *testing.T) {
 	if notifier.Count() != 1 {
 		t.Fatalf("expected exactly one notification delivered, got %d", notifier.Count())
 	}
+}
 
-	// Metrics: a real cleanup attempt against the cloud domain, through
-	// S3Adapter, must be counted exactly like a FakeCloudClient-backed
-	// one would be -- the Controller is unaware which implementation is
-	// behind c.Cloud.
+// assertFullLifecycleMetrics is
+// TestS3AdapterEndToEnd_FullLifecycleThroughTelemetry's metrics
+// assertions, factored out purely to keep that test's own cyclomatic
+// complexity readable -- behavior is unchanged from having it inline.
+func assertFullLifecycleMetrics(t *testing.T, reg *prometheus.Registry, metrics *Metrics, root string) {
+	t.Helper()
 	if got := counterVecValue(t, reg, "cleanup_attempts_total", map[string]string{"domain": "cloud", "outcome": StatusVerifiedClean}); got != 1 {
 		t.Errorf("expected cleanup_attempts_total{domain=cloud,outcome=verified_clean}=1, got %v", got)
 	}
@@ -132,15 +164,18 @@ func TestS3AdapterEndToEnd_FullLifecycleThroughTelemetry(t *testing.T) {
 	if got := gaugeValue(t, reg, "cleanup_unresolved_environments"); got != 0 {
 		t.Errorf("expected cleanup_unresolved_environments=0 once the only environment is verified_clean, got %v", got)
 	}
+}
 
-	// Traces: the cleanup pass and the notification send must each have
-	// produced a span, both carrying this environment's ID, proving the
-	// real S3Adapter path is instrumented identically to the fake-client
-	// path telemetry_test.go already covers.
+// assertFullLifecycleSpans checks that both the cleanup pass and the
+// notification send produced a span carrying environmentID -- proving
+// the real S3Adapter path is instrumented identically to the fake-
+// client path telemetry_test.go already covers.
+func assertFullLifecycleSpans(t *testing.T, spans *tracetest.SpanRecorder, environmentID string) {
+	t.Helper()
 	var sawCleanupSpan, sawNotificationSpan bool
 	for _, sp := range spans.Ended() {
 		for _, kv := range sp.Attributes() {
-			if string(kv.Key) == "environment_id" && kv.Value.AsString() == env.ID {
+			if string(kv.Key) == "environment_id" && kv.Value.AsString() == environmentID {
 				switch sp.Name() {
 				case "playground.send_notification":
 					sawNotificationSpan = true
@@ -156,15 +191,17 @@ func TestS3AdapterEndToEnd_FullLifecycleThroughTelemetry(t *testing.T) {
 	if !sawNotificationSpan {
 		t.Error("expected a playground.send_notification span carrying this environment's ID")
 	}
+}
 
-	// Structured logs: at least one cleanup_event line and one
-	// cleanup_notification_event line, both correlated to this
-	// environment, must have been emitted -- never silently skipped
-	// just because the real S3Adapter (rather than FakeCloudClient) was
-	// behind the call.
+// assertFullLifecycleLogs checks that at least one cleanup_event line
+// and one cleanup_notification_event line, both correlated to
+// environmentID, were emitted -- never silently skipped just because
+// the real S3Adapter (rather than FakeCloudClient) was behind the call.
+func assertFullLifecycleLogs(t *testing.T, logs *bytes.Buffer, environmentID string) {
+	t.Helper()
 	logged := logs.String()
-	if !strings.Contains(logged, `"cleanup_event"`) || !strings.Contains(logged, env.ID) {
-		t.Errorf("expected a cleanup_event log line correlated to %s, got: %s", env.ID, logged)
+	if !strings.Contains(logged, `"cleanup_event"`) || !strings.Contains(logged, environmentID) {
+		t.Errorf("expected a cleanup_event log line correlated to %s, got: %s", environmentID, logged)
 	}
 	if !strings.Contains(logged, `"cleanup_notification_event"`) {
 		t.Errorf("expected a cleanup_notification_event log line, got: %s", logged)

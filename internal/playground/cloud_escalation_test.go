@@ -377,20 +377,7 @@ func TestResetCloudCleanupAttempts_SecondEscalationGetsItsOwnNotification(t *tes
 	}
 
 	notifier := &FakeNotifier{}
-	firstReport, err := c.GenerateCleanupReport(context.Background(), root, envs[0], nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if firstReport.CloudEscalationEpisode != 0 {
-		t.Fatalf("expected the first escalation's report to carry episode 0, got %d", firstReport.CloudEscalationEpisode)
-	}
-	sent, err := SendCleanupNotification(context.Background(), root, firstReport, notifier, now, nil)
-	if err != nil || !sent {
-		t.Fatalf("expected the first escalation's notification to be sent, sent=%v err=%v", sent, err)
-	}
-	if notifier.Count() != 1 {
-		t.Fatalf("expected exactly one delivery after the first escalation, got %d", notifier.Count())
-	}
+	notifyEscalationAndRequireDelivered(t, c, root, envs[0], notifier, now, 0, 1)
 
 	// Human resets -- this must bump the episode, not just clear attempts.
 	if err := ResetCloudCleanupAttempts(root, env.ID, "alice"); err != nil {
@@ -409,32 +396,48 @@ func TestResetCloudCleanupAttempts_SecondEscalationGetsItsOwnNotification(t *tes
 	if envs[0].Status != StatusCleanupAttentionRequired {
 		t.Fatalf("expected second escalation, got %q", envs[0].Status)
 	}
+	notifyEscalationAndRequireDelivered(t, c, root, envs[0], notifier, now, 1, 2)
 
-	secondReport, err := c.GenerateCleanupReport(context.Background(), root, envs[0], nil)
+	assertPreservedDeliveredAuditRecords(t, root, env.ID, 0, 1)
+}
+
+// notifyEscalationAndRequireDelivered generates env's current cleanup
+// report, asserts it carries wantEpisode, sends its notification, and
+// asserts notifier's cumulative delivery count is wantTotalDeliveries --
+// the repeated core of the repeat-escalation regression test, factored
+// out so it can be called once per escalation without duplicating all
+// of its assertions inline.
+func notifyEscalationAndRequireDelivered(t *testing.T, c Controller, root string, env Environment, notifier *FakeNotifier, now time.Time, wantEpisode, wantTotalDeliveries int) {
+	t.Helper()
+	report, err := c.GenerateCleanupReport(context.Background(), root, env, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if secondReport.CloudEscalationEpisode != 1 {
-		t.Fatalf("expected the second escalation's report to carry episode 1, got %d", secondReport.CloudEscalationEpisode)
+	if report.CloudEscalationEpisode != wantEpisode {
+		t.Fatalf("expected episode %d, got %d", wantEpisode, report.CloudEscalationEpisode)
 	}
-
-	sent, err = SendCleanupNotification(context.Background(), root, secondReport, notifier, now, nil)
+	sent, err := SendCleanupNotification(context.Background(), root, report, notifier, now, nil)
 	if err != nil || !sent {
-		t.Fatalf("THE BUG: expected the second escalation's notification to be sent as a NEW event, sent=%v err=%v", sent, err)
+		t.Fatalf("expected escalation episode %d's notification to be sent, sent=%v err=%v", wantEpisode, sent, err)
 	}
-	if notifier.Count() != 2 {
-		t.Fatalf("expected exactly two distinct deliveries across both escalations, got %d", notifier.Count())
+	if notifier.Count() != wantTotalDeliveries {
+		t.Fatalf("expected %d cumulative deliveries after episode %d, got %d", wantTotalDeliveries, wantEpisode, notifier.Count())
 	}
+}
 
-	// Audit history: both escalations must have their own durable,
-	// delivered record -- the first one's is never overwritten or lost.
-	records, err := LoadNotificationRecords(root, env.ID)
+// assertPreservedDeliveredAuditRecords checks that every episode in
+// episodes has its own durable, delivered NotificationRecord for id --
+// proving an earlier episode's record is never overwritten or lost once
+// a later one is created.
+func assertPreservedDeliveredAuditRecords(t *testing.T, root, id string, episodes ...int) {
+	t.Helper()
+	records, err := LoadNotificationRecords(root, id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantIDs := map[string]bool{
-		notificationID(env.ID, NotificationAttentionRequired, 0): false,
-		notificationID(env.ID, NotificationAttentionRequired, 1): false,
+	wantIDs := map[string]bool{}
+	for _, ep := range episodes {
+		wantIDs[notificationID(id, NotificationAttentionRequired, ep)] = false
 	}
 	for _, rec := range records {
 		if _, ok := wantIDs[rec.ID]; ok {
