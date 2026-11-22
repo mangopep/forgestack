@@ -665,6 +665,93 @@ unchanged by this increment. This increment does not advance past step 1 of that
 only completes step 1's prerequisite (the adapter to validate), with the exact same strict
 "nothing below has been run" framing the original plan stated for every subsequent step.
 
+## CLI integration (`playground cleanup-due`/`worker`), simulated-only
+
+`internal/playground/cloud_provider.go` adds `playground.NewCloudClient(provider, mode,
+account, region, root)` -- the single choke point `cmd/playground`'s `--cloud-provider`/
+`--cloud-mode`/`--cloud-account`/`--cloud-region`/`--cloud-retry-backoff` flags (on
+`cleanup-due` and `worker`) go through, and a new `playground track-cloud` CLI subcommand
+(mirroring the existing `track-docker`) to actually record a tracked `CloudResourceRef`
+through the CLI, which previously had no way to do so at all.
+
+**Explicit, future-proof provider selection -- no S3 hardcoded into the CLI.**
+`cloudProviderRegistry` (`cloud_provider.go`) is a `map[string]cloudProviderFactory`; `"s3"` is
+the only entry today. Adding a second AWS service later means writing one more
+`newXxxCloudProvider` function with the same signature and adding one more map entry --
+nothing in `cmd/playground`'s flag parsing, dispatch, or help text changes, and
+`KnownCloudProviders()` keeps CLI help text in sync automatically. `--cloud-provider` left at
+its default `""` means `cloudFlags.apply` (`cmd/playground/main.go`) returns the `Controller`
+completely unchanged -- `playground.NewCloudClient` is never called, no provider-specific code
+runs, and behavior is byte-for-byte identical to before this flag existed (*confirmed from
+test*, `TestCLICloudProvider_NoCloudOptionsNeverInitializesCloudComponent`).
+
+**Simulation mode, deterministic fixtures.** `--cloud-mode=sim` (the default) builds an
+in-memory `FakeCloudClient`, seeded by `seedSimulatedS3Fixtures` purely from what is already
+tracked under `root` via `track-cloud` -- never randomness, never the wall clock -- then wraps
+it in `scopedSimulatedCloudClient`, which actively refuses (errors on) any ref outside the
+client's own configured account+region, mirroring the real `S3Adapter.checkScope` exactly
+(*confirmed from code*: `errSimulatedScopeMismatch`; *confirmed from test*,
+`TestNewCloudClient_CrossScopeRefIsRejectedByReturnedClient`). Three bucket-name conventions
+select fixture behavior (documented fully on `seedSimulatedS3Fixtures`): no suffix (clean,
+owned, cleans up immediately), `-missing-tag` (tag drift, never verifies), `-flaky-N` (fails
+`N` attempts, computed from the already-persisted `cloud-cleanup-state.json` attempt count --
+not an in-process counter -- so it converges correctly across separate `cleanup-due` process
+restarts, not just within one long-running `worker`).
+
+**Labeling is never a caller-set flag.** Every `CleanupReport`/log line's `SIMULATED`/`LIVE`
+label is derived by the pre-existing, independently-audited `cloudVerificationMode`
+(`cleanup_report.go`) from the returned `CloudClient`'s own concrete type -- this increment
+adds zero new labeling logic, and the simulated client it builds has no way to ever report
+`LIVE` (*confirmed from test*, `TestNewCloudClient_SimulatedReturnsScopedClientLabeledSimulated`).
+
+**Real/live mode fails closed, unconditionally.** `--cloud-mode=live` returns
+`errLiveCloudModeNotAvailable` as the very first statement in `newS3CloudProvider`, before even
+checking account/region. `cloud_provider.go` does not import
+`github.com/aws/aws-sdk-go-v2/config` or `.../credentials`, and a dedicated build-graph-level
+test (`TestNoAWSCredentialOrConfigPackageIsEverCompiledIn`, `cloud_no_aws_access_test.go`) fails
+the build if either package ever becomes a transitive dependency of this package again --
+*confirmed from test*, not just from a comment. A second test
+(`TestCLICloudProvider_LiveModeFailsClosedWithNoAWSEnvironment`) runs the real compiled binary
+with every `AWS_*` and `HOME` environment variable stripped and asserts the exact static
+fail-closed error message, never an AWS-SDK-shaped error, confirming no credential resolution
+was attempted.
+
+**Everything downstream of `WithCloud` is untouched.** `Controller.CleanupDue`/
+`attemptCloudCleanup`/`cloud_retry.go`'s bounded-retry, backoff, and escalation state machine,
+`CloudReconcile`/`RemoveTrackedCloudResources`'s ownership re-verification, and
+`VerifyOwnership`-then-`Remove` ordering are not modified by this CLI integration at all --
+only a `CloudClient` is now reachable to feed them from the CLI. `--cloud-retry-backoff`
+(default 1 minute, matching `NewController`'s own default) is the one new tunable, letting an
+operator shrink or disable the existing safety gate without touching library code; proven
+end-to-end, including a full 2-failure-then-success convergence across three separate
+`cleanup-due` process restarts (not three passes of one process), by
+`TestCLICloudProvider_RetriesEscalationAndRestartRecovery`.
+
+**Remaining real-AWS integration gaps -- explicit, not implied.** Wiring a real, credentialed
+`S3Adapter` into the CLI is a separately approved, not-yet-started increment, and will require,
+at minimum, beyond what this CLI integration does:
+
+1. **Independent account identity verification.** `S3Adapter.Account` is still
+   operator-asserted (see "Real S3Adapter" above) -- a live CLI path would need an `sts`
+   `GetCallerIdentity` call (and the `aws-sdk-go-v2/service/sts` + `.../config`/`.../credentials`
+   modules this repository deliberately does not have today) to confirm the account a real
+   client actually authenticates as matches the `--cloud-account` an operator typed, rather than
+   trusting the string.
+2. **Restricted IAM, scoped to exactly this adapter's 8 S3 API calls** (`ListBuckets`,
+   `GetBucketTagging`, `ListObjectVersions`, `ListMultipartUploads`, `DeleteObjects`,
+   `AbortMultipartUpload`, `DeleteBucket`, `HeadBucket`) -- never a broader `s3:*` grant -- and
+   reviewed against this repository's existing `$4` AWS budget/`ForgeStackTestRole` constraints
+   before any credential is ever generated.
+3. **Explicit, separate approval before the live branch is implemented at all** -- not implied
+   by this CLI integration shipping `--cloud-mode=live` as an accepted flag value. That value
+   exists today only so the CLI surface and `cloudProviderRegistry` already have a place for it;
+   accepting the flag value is not authorization to build what it would do.
+4. **Independent deletion evidence beyond this package's own `CleanupReport`.** A real deletion
+   should be corroborated by something this process did not itself write -- e.g. an AWS
+   CloudTrail event, or a separate read-only listing pass run by different tooling/credentials --
+   so "we believe we deleted it" and "it is independently confirmed gone" are never the same
+   claim resting on the same code path.
+
 ### Full verification after this increment
 
 `gofmt` clean, `go vet ./...` clean, `go build ./...` clean, `golangci-lint run ./...` → 0
