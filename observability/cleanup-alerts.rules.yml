@@ -1,0 +1,67 @@
+# Prometheus alerting rules for the playground cleanup lifecycle
+# (internal/playground). Loaded by observability/prometheus.yml's
+# rule_files directive. These fire against whatever this machine's own
+# playground worker scrapes into Prometheus -- with the
+# FakeDockerClient/FakeCloudClient test doubles this repository ships,
+# "firing" means "this package's own local/simulated logic reached that
+# state," never "a real AWS resource is actually in that state."
+groups:
+  - name: forgestack-cleanup
+    rules:
+      - alert: ForgeStackCleanupAttentionRequired
+        expr: increase(cleanup_attention_required_total[10m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "A playground environment escalated to cleanup_attention_required"
+          description: >-
+            At least one environment exhausted its bounded automatic cloud
+            cleanup retries in the last 10 minutes and now requires a human
+            to call ResetCloudCleanupAttempts after fixing the underlying
+            problem. Tracked resources were never discarded. SIMULATED
+            unless a real, authenticated CloudClient is wired in -- see
+            internal/playground/cleanup_report.go's LiveCloudClient.
+
+      - alert: ForgeStackCleanupNotificationFailureRate
+        expr: |
+          sum(rate(cleanup_notification_total{outcome=~"failed|finalize_failed"}[15m]))
+            /
+          clamp_min(sum(rate(cleanup_notification_total[15m])), 1e-9) > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Cleanup notifications are failing to deliver"
+          description: >-
+            A nonzero share of notification delivery attempts failed over
+            the last 15 minutes. Cleanup correctness is unaffected (see
+            SendCleanupNotification's failure-isolation guarantee) -- this
+            alert is about a human potentially not being told about a
+            real cleanup outcome.
+
+      - alert: ForgeStackCleanupUnresolvedEnvironmentsHigh
+        expr: cleanup_unresolved_environments > 20
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Many playground environments remain unresolved"
+          description: >-
+            More than 20 environments have not reached verified_clean for
+            over 30 minutes -- worth checking whether the worker is
+            running, Docker/Cloud clients are configured, or something is
+            stuck.
+
+      - alert: ForgeStackCleanupClaimRecoveryRateNonzero
+        expr: increase(cleanup_claim_recovery_total[30m]) > 0
+        for: 0m
+        labels:
+          severity: info
+        annotations:
+          summary: "A notification claim was abandoned and reclaimed"
+          description: >-
+            A notification delivery attempt never finalized (process
+            crash, stuck notifier) and was reclaimed after its lease
+            expired. Possible duplicate delivery for that one event --
+            see notification.go's documented at-least-once semantics.
