@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"os/user"
@@ -13,6 +15,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"github.com/mangopep/forgestack/internal/platform/telemetry"
 	"github.com/mangopep/forgestack/internal/playground"
 )
 
@@ -53,7 +59,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "reconcile flags: --root .forgestack/environments --id env-<16 hex> (read-only; reports drift, never removes anything)")
 	fmt.Fprintln(os.Stderr, "expire-due flags: --root .forgestack/environments (transitions due playgrounds to EXPIRED; never removes anything)")
 	fmt.Fprintln(os.Stderr, "cleanup-due flags: --root .forgestack/environments [--docker] (expires + cleans up every due environment, local filesystem and -- with --docker -- tracked Docker resources)")
-	fmt.Fprintln(os.Stderr, "worker flags: --root .forgestack/environments --interval 5m [--docker] (runs cleanup-due on a timer until SIGINT/SIGTERM; opt-in, not started by any other command)")
+	fmt.Fprintln(os.Stderr, "worker flags: --root .forgestack/environments --interval 5m [--docker] [--metrics-addr :9469] (runs cleanup-due on a timer until SIGINT/SIGTERM; opt-in, not started by any other command; metrics-addr opt-in, disabled by default)")
 	os.Exit(2)
 }
 
@@ -164,6 +170,7 @@ func worker(args []string) error {
 	root := flags.String("root", ".forgestack/environments", "local environment directory")
 	interval := flags.Duration("interval", 5*time.Minute, "how often to run expire-due + cleanup-due")
 	useDocker := flags.Bool("docker", false, "also remove and independently verify tracked Docker resources each pass")
+	metricsAddr := flags.String("metrics-addr", "", "if set (e.g. :9469), serve Prometheus metrics for cleanup observability on this address; also enables OTel tracing via OTEL_EXPORTER_OTLP_ENDPOINT if set. Disabled by default -- no behavior change, no listener, no telemetry overhead unless explicitly opted into.")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -173,6 +180,44 @@ func worker(args []string) error {
 		w = w.WithDocker(playground.NewDockerClient())
 	}
 	w.Logf = func(format string, a ...any) { fmt.Fprintf(os.Stderr, format+"\n", a...) }
+
+	if *metricsAddr != "" {
+		// Reuses internal/platform/telemetry exactly like cmd/api does --
+		// no new monitoring stack, no new dependency. Setup with no
+		// OTEL_EXPORTER_OTLP_ENDPOINT set (the common case) still
+		// succeeds and simply never exports a span anywhere; it never
+		// blocks or errors cleanup itself.
+		setupCtx, cancelSetup := context.WithTimeout(context.Background(), 10*time.Second)
+		shutdownTelemetry, err := telemetry.SetupFromEnv(setupCtx, "forgestack-playground-worker", "dev")
+		cancelSetup()
+		if err != nil {
+			return fmt.Errorf("telemetry setup: %w", err)
+		}
+		defer func() {
+			shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancelShutdown()
+			if err := shutdownTelemetry(shutdownCtx); err != nil {
+				slog.Warn("telemetry shutdown", "error", err)
+			}
+		}()
+
+		reg := prometheus.NewRegistry()
+		w.Controller.Metrics = playground.NewMetrics(reg)
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
+		server := &http.Server{Addr: *metricsAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+		go func() {
+			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				slog.Error("metrics server", "error", err)
+			}
+		}()
+		defer func() {
+			shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancelShutdown()
+			_ = server.Shutdown(shutdownCtx)
+		}()
+		fmt.Fprintf(os.Stderr, "playground worker: serving Prometheus metrics on %s/metrics\n", *metricsAddr)
+	}
 
 	// SIGINT (Ctrl-C) and SIGTERM (what `kill` sends by default, and what
 	// a service manager sends to ask a process to stop) both cancel ctx;
