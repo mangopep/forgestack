@@ -259,9 +259,23 @@ func TestUnresolvedGauge_AccurateAfterRecoveryAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Manager.Create stamps ExpiresAt from the real wall clock
+	// independently for each call, so envA and envB's ExpiresAt values
+	// are not guaranteed to be equal -- freezing Controller.Now relative
+	// to envA alone leaves envB's expiry undetermined by however much
+	// real time elapsed between the two Create calls above. Using the
+	// LATER of the two (not an arbitrarily widened margin) guarantees
+	// both are due regardless of that gap, without relying on wall-clock
+	// scheduling at all.
+	frozenNow := envA.ExpiresAt
+	if envB.ExpiresAt.After(frozenNow) {
+		frozenNow = envB.ExpiresAt
+	}
+	frozenNow = frozenNow.Add(time.Millisecond)
+
 	reg := prometheus.NewRegistry()
 	metrics := NewMetrics(reg)
-	c := Controller{Manager: m, Now: func() time.Time { return envA.ExpiresAt.Add(time.Millisecond) }, Sleep: noSleep, MaxCleanupAttempts: 1, Metrics: metrics}
+	c := Controller{Manager: m, Now: func() time.Time { return frozenNow }, Sleep: noSleep, MaxCleanupAttempts: 1, Metrics: metrics}
 	if _, err := c.ExpireDue(root); err != nil {
 		t.Fatal(err)
 	}
@@ -293,8 +307,6 @@ func TestUnresolvedGauge_AccurateAfterRecoveryAndRestart(t *testing.T) {
 	if got := gaugeValue(t, freshReg, "cleanup_unresolved_environments"); got != 0 {
 		t.Fatalf("expected a fresh recount after restart to also be 0, got %v", got)
 	}
-
-	_ = envB // referenced only for clarity of the two-environment setup
 }
 
 // TestTraceCorrelation_SpansNestAcrossCleanupStages proves requirement
