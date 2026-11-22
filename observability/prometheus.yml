@@ -8,7 +8,20 @@
 global:
   scrape_interval: 5s
 
+rule_files:
+  - cleanup-alerts.rules.yml
+
 scrape_configs:
   - job_name: forgestack-service
     static_configs:
       - targets: ["host.docker.internal:8080"]
+
+  # The `playground worker --metrics-addr :9469` subcommand (opt-in,
+  # disabled by default -- see cmd/playground/main.go) serves the same
+  # standard Prometheus text format on this port. Only scraped if you
+  # actually start the worker with that flag; otherwise this target is
+  # simply down (Prometheus shows it as such, which is correct -- the
+  # worker is not running, not an error in this config).
+  - job_name: forgestack-playground-worker
+    static_configs:
+      - targets: ["host.docker.internal:9469"]

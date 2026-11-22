@@ -42,6 +42,11 @@ services:
     image: prom/prometheus:v3.7.3
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # prometheus.yml's rule_files directive names this file by a path
+      # relative to itself (/etc/prometheus/) -- it must be mounted
+      # alongside it or Prometheus fails to load the cleanup alert rules
+      # (ForgeStackCleanupAttentionRequired and friends) entirely.
+      - ./cleanup-alerts.rules.yml:/etc/prometheus/cleanup-alerts.rules.yml:ro
       - prometheus-data:/prometheus
     command:
       - --config.file=/etc/prometheus/prometheus.yml
