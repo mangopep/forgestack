@@ -104,12 +104,13 @@ func (w *Worker) WithDocker(d DockerClient) *Worker {
 }
 
 // WithCloud returns w with its Controller's Cloud client set (see
-// Controller.WithCloud). Not wired into the playground worker CLI
-// subcommand -- no AWS-SDK-backed CloudClient exists in this repository
-// yet, so there is nothing safe for a --cloud flag to construct. This
-// method exists so that wiring, once a real client is separately
-// approved and built, is a one-line CLI change rather than a library
-// change.
+// Controller.WithCloud). Wired into the playground worker CLI's
+// --cloud-provider flag (cmd/playground/main.go) via
+// playground.NewCloudClient -- simulated mode only in this build; live
+// mode fails closed before any credential or network access (see
+// cloud_provider.go). A real, credentialed CloudClient remains a
+// separately approved increment (see
+// docs/architecture/CLOUD-CLEANUP-S3.md).
 func (w *Worker) WithCloud(c CloudClient) *Worker {
 	w.Controller = w.Controller.WithCloud(c)
 	return w
